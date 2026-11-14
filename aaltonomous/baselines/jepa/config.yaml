@@ -1,0 +1,69 @@
+# JEPA world-model policy (V-JEPA 2-AC style). Everything tunable lives here; CLI flags / overrides use dotted keys
+# ("planner.samples": 512). Independent from the classical baseline: it only borrows its hand postures and home pose
+# (aaltonomous/baselines/classical/config.yaml, profile `sim`) so both start from the same pose.
+
+hz: 30.0
+macro_ticks: 8                # one world-model step = 8 control ticks (0.27 s); actions are per macro step
+
+encoder:
+  kind: vjepa2                # vjepa2 (frozen, Hugging Face) | tiny (random fixed CNN: tests / plumbing only)
+  hf_id: facebook/vjepa2-vitl-fpc64-256   # ViT-L, 256 px, 1024-d tokens, 16x16 patches per tubelet
+  image_size: 256
+  pool_grid: 8                # 16x16 patch tokens -> 8x8 = 64 tokens per camera (avg pool); memory vs detail
+  cameras: [head_rgb]         # add left_wrist_rgb / right_wrist_rgb to condition on the wrist views too
+  dtype: float16              # encoder compute dtype on CUDA
+  tiny_dim: 64                # tiny encoder token width
+
+action:
+  # Planning space per macro step: delta arm joints (14) + one grip scalar per hand (0 = open, 1 = closed).
+  # The grip interpolates between the classical config's `open` and `closed` Dex3 postures.
+  arm_step_frac: 0.9          # max |delta arm| per macro step = frac * safety arm_max_vel * macro_ticks / hz
+  joint_margin: 0.08          # rad kept away from the URDF limits when planning
+
+predictor:
+  dim: 384
+  depth: 6
+  heads: 6
+  context: 4                  # macro steps per training window (teacher forcing) = max planning context
+  dropout: 0.0
+
+train:
+  batch: 32
+  lr: 3.0e-4
+  weight_decay: 0.04
+  steps: 20000
+  warmup: 500
+  rollout_steps: 2            # autoregressive rollout loss over this many steps (V-JEPA 2-AC: 2)
+  rollout_weight: 1.0
+  log_every: 100
+  save_every: 2000
+  val_frac: 0.1
+  num_workers: 2
+
+planner:
+  horizon: 3                  # macro steps planned ahead (only the first is executed, then replan)
+  samples: 256
+  iters: 4
+  elites: 32
+  init_std: 0.5               # as a fraction of the per-step bound
+  momentum: 0.1
+  grip_std: 0.35
+  energy_all_steps: false     # true: sum L1 over every predicted step, false: final step only (V-JEPA 2-AC)
+  smooth_weight: 0.02         # penalty on |delta arm| (prefers short motions)
+
+goals:
+  # Sub-goal source: retrieval in a bank of demo latents. The current frame is matched to its nearest demo frame
+  # (cosine of mean-pooled tokens + proprio), the goal is the frame `lookahead` macro steps later in that demo.
+  lookahead: 4
+  proprio_weight: 0.5         # how much joint state counts in retrieval vs the image
+  only_success: true          # bank keeps successful episodes only (when the episode says)
+  match_instruction: true     # rung 2: prefer demos with the same colour -> bin mapping
+  done_frac: 0.97             # neighbour this far into its demo for `done_patience` looks -> episode done
+  done_patience: 4
+  max_bank_frames: 20000
+
+policy:
+  hold_ticks: 3               # hold chunk while thinking (counts as policy commands; keeps the rate at 30 Hz)
+  home_first: true            # move to the home pose before the first look
+  settle_s: 0.3
+  time_margin_s: 1.0          # say done this long before the time limit
