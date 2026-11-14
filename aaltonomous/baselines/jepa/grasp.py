@@ -372,20 +372,25 @@ class JepaVerifyPolicy(_VariantPolicy):
         if e is not None and not e["checked"] and self.state == "executing" and self._executed() >= e["lift_end"]:
             e["checked"] = True
             plan = e["plan"]
-            p = self.verifier.p_held(obs, plan)
             t = float(obs.get("t", 0.0))
             xy = plan.waypoints["grasp"][:2]
             self.tried.append((xy, plan.variant["name"]))
-            self.verifications.append({"t": t, "color": plan.color, "variant": plan.variant["name"], "p_held": p,
-                                       "abort": p < self.verifier.threshold})
-            if p < self.verifier.threshold:
+            rec, abort, why = self._check(obs, plan)
+            self.verifications.append({"t": t, "color": plan.color, "variant": plan.variant["name"], **rec,
+                                       "abort": abort})
+            if abort:
                 self.n_aborts += 1
-                self._note(t, f"verify {plan.color} ({plan.variant['name']}): p(held)={p:.2f} < "
-                              f"{self.verifier.threshold:.2f} -> abort, retry with another grasp")
+                self._note(t, f"verify {plan.color} ({plan.variant['name']}): {why} -> abort, retry with another grasp")
                 self._abort(plan)
             else:
-                self._note(t, f"verify {plan.color}: p(held)={p:.2f} -> carry on")
+                self._note(t, f"verify {plan.color}: {why} -> carry on")
         return super().act(obs)
+
+    def _check(self, obs, plan):
+        """-> (record, abort?, reason). V-JEPA 2 crop verifier only."""
+        p = self.verifier.p_held(obs, plan)
+        thr = self.verifier.threshold
+        return {"p_held": p}, p < thr, f"p(held)={p:.2f} {'<' if p < thr else '>='} {thr:.2f}"
 
     def _abort(self, plan):
         from aaltonomous.baselines.classical.kinematics import ArmKinematics
@@ -405,6 +410,63 @@ class JepaVerifyPolicy(_VariantPolicy):
         self._exec = None
 
 
+class FingerJepaVerifyPolicy(JepaVerifyPolicy):
+    """v5: the lift-end check reads the Dex3 finger closure first, the V-JEPA 2 crop verifier second.
+
+    grip = projection of the hand's joint positions on the open->closed line (1 = fully closed on nothing). In the
+    sim a held object stops the fingers at 0.92-0.995, an empty hand closes to >= 0.999 (589 picks, no overlap). Clear
+    readings decide alone; readings in between (sensor noise / calibration on the real robot) go to the JEPA verifier.
+    Retries switch grasp family (finger direction band x height) before reusing one, best delivery rate first, and
+    the stock classical grasp is always tried first.
+    """
+
+    def __init__(self, *a, grip_empty=0.998, grip_held=0.99, family_prior=None, **kw):
+        super().__init__(*a, **kw)
+        from .common import ActionSpace, load_config
+        self.space = ActionSpace(load_config())
+        self.grip_empty, self.grip_held = grip_empty, grip_held
+        self.family_prior = family_prior
+
+    def _check(self, obs, plan):
+        g = float(self.space.grip_of(np.asarray(obs["hand_q"], float))[0 if plan.side == "left" else 1])
+        p = float(self.verifier.p_held(obs, plan))          # always run: logged + shown, decides only if ambiguous
+        thr = self.verifier.threshold
+        rec = {"grip": round(g, 4), "p_held": p}
+        if g >= self.grip_empty:
+            return {**rec, "by": "fingers"}, True, f"fingers closed on nothing (grip {g:.3f}), JEPA p(held)={p:.2f}"
+        if g <= self.grip_held:
+            return {**rec, "by": "fingers"}, False, f"fingers stopped by the object (grip {g:.3f}), JEPA p(held)={p:.2f}"
+        return {**rec, "by": "jepa"}, p < thr, f"fingers unsure (grip {g:.3f}) -> JEPA p(held)={p:.2f} vs {thr:.2f}"
+
+    def choose(self, det, arm_q, hand_q, obstacles):
+        skip = self._tried_here(det)
+        fams = {variant_family({"name": n, "hint_deg": _hint_of(n), "height_frac": _h_of(n)}) for n in skip}
+        vs = make_variants(det, None, n=64)
+        rest = [v for v in vs[1:] if v.name not in skip]
+        if self.family_prior is not None:
+            rest = order_by_prior(rest, self.family_prior)
+        rest = [v for v in rest if variant_family(v) not in fams] + [v for v in rest if variant_family(v) in fams]
+        order = ([vs[0]] if vs[0].name not in skip else []) + rest
+        last = None
+        for v in order:
+            p = plan_variant(self._inner, det, v, arm_q, hand_q, obstacles)
+            if p.ok:
+                p.variant = v.as_dict()
+                self._cands = [p] if lift_end(p) is not None else []
+                return p
+            last = last or p
+        self._cands = []
+        return last
+
+
+def _hint_of(name):
+    return float(name[4:].split("_")[0]) if name.startswith("hint") else 0.0
+
+
+def _h_of(name):
+    return float(name.split("_h")[1]) if "_h" in name else 0.5
+
+
 # --------------------------------------------------------------------------------------------- data-driven variant order
 def variant_family(v):
     """Coarse family of a variant dict / Variant: finger direction band x grasp height (or shift / classical)."""
@@ -419,15 +481,17 @@ def variant_family(v):
     return f"{band}_h{d['height_frac']}"
 
 
-def fit_variant_prior(picks_dir, out=None, alpha=2.0):
-    """Held rate per family from collect_grasps.py picks, shrunk towards the overall rate (alpha pseudo-counts)."""
+def fit_variant_prior(picks_dir, out=None, alpha=2.0, label="held"):
+    """Success rate (`label`: held | delivered) per family from collect_grasps.py picks, shrunk towards the overall
+    rate (alpha pseudo-counts)."""
     import glob
     import json
-    rows = [p for f in glob.glob(f"{picks_dir}/*.json") for p in json.load(open(f))["picks"]]
-    base = float(np.mean([p["held"] for p in rows]))
+    rows = [p for f in glob.glob(f"{picks_dir}/*.json") for p in json.load(open(f))["picks"]
+            if p.get(label) is not None]
+    base = float(np.mean([bool(p[label]) for p in rows]))
     fam = {}
     for p in rows:
-        fam.setdefault(variant_family(p["variant"]), []).append(p["held"])
+        fam.setdefault(variant_family(p["variant"]), []).append(bool(p[label]))
     prior = {k: {"n": len(v), "rate": round((sum(v) + alpha * base) / (len(v) + alpha), 3)} for k, v in fam.items()}
     prior["_base"] = {"n": len(rows), "rate": round(base, 3)}
     if out:

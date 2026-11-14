@@ -20,10 +20,12 @@ from .collect_grasps import held_now, lift_xy
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--policy", choices=["classical", "jepa", "verify"], default="verify")
+    ap.add_argument("--policy", choices=["classical", "jepa", "verify", "v5"], default="verify")
     ap.add_argument("--verifier", default="runs/jepa/held_verifier.pt")
     ap.add_argument("--max-attempts", type=int, default=6, help="verify: tries per object (aborts are cheap)")
     ap.add_argument("--prior", default=None, help="variant_prior.json (grasp.fit_variant_prior): best families first")
+    ap.add_argument("--family-prior", default="runs/jepa/variant_prior_dlv.json",
+                    help="v5: delivery rate per grasp family (fit_variant_prior label=delivered), retry order")
     ap.add_argument("--critic", default=None, help="critic file (jepa: required; verify: optional ranking of retries)")
     ap.add_argument("--n-variants", type=int, default=6)
     ap.add_argument("--margin", type=float, default=0.05, help="variant must beat the stock plan's p(held) by this")
@@ -51,6 +53,12 @@ def main(argv=None):
                                verifier=HeldVerifier(a.verifier, encoder=getattr(critic, "enc", None)), critic=critic,
                                n_variants=a.n_variants, margin=a.margin,
                                prior=json.load(open(a.prior)) if a.prior else None, max_attempts=a.max_attempts)
+    elif a.policy == "v5":
+        from .crop_critic import HeldVerifier
+        from .grasp import FingerJepaVerifyPolicy
+        pol = FingerJepaVerifyPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+                                     verifier=HeldVerifier(a.verifier), max_attempts=a.max_attempts,
+                                     family_prior=json.load(open(a.family_prior)) if a.family_prior else None)
     elif a.policy == "jepa":
         critic = load_any_critic(a.critic)
         pol = JepaGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, critic=critic,

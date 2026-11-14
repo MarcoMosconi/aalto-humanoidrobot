@@ -93,7 +93,15 @@ augmentation, but only 10 drop examples so far; `collect_grasps.py --prefer h0.3
 
 Rung 1, nominal sim, seeds 0-15 (classical 54/72 = 75 %): verify v1 (3 attempts) 16/23 vs 19/23 on matched seeds,
 v2 (+ held-rate variant prior) 6/10 vs 9/10, v3 (6 attempts) 34/46 vs 36/46 on 14 seeds, all stopped early;
-v4 (444-grasp verifier, 10 % false aborts) running. Run-to-run spread is about +-10 %.
+v4 (444-grasp verifier, 10 % false aborts) 26/29 on the 8 seeds it finished (stopped: too many retries on hard
+seeds). Run-to-run spread is about +-10 %.
+
+**Finger check (v5, `FingerJepaVerifyPolicy`, `grasp_eval.py --policy v5`).** The Dex3 finger closure (hand joints
+projected on the open->closed line) separates held from empty perfectly in the sim: held 0.92-0.995, empty >= 0.999
+(589 picks, AUC 0.999, vs 0.94 for the JEPA crop verifier). v5 lets clear finger readings decide and hands the
+ambiguous band (0.99-0.998, where real-robot noise would land) to the JEPA verifier, which runs and is logged on every
+pick. Retries switch grasp family, best delivery rate first (`fit_variant_prior(..., label="delivered")`). Drops
+during the carry stay unpredictable from both the lift crop (AUC ~0.62 on 36 drops) and the fingers (~0.4-0.5).
 
 ## Design notes and known limits
 
