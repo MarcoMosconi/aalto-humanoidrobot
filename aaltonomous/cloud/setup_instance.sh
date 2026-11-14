@@ -26,6 +26,7 @@ ASSETS_REV=55e40ff4705e1c6b26831862a6227839ac0e10d1         # HF dataset unitree
 export PIP_CONSTRAINT="$HERE/isaac-constraints.txt"           # pip freeze of the working env
 export PIP_NO_CACHE_DIR=1 OMNI_KIT_ACCEPT_EULA=YES
 export CYCLONEDDS_HOME="$TP/cyclonedds/install"
+export CMAKE_POLICY_VERSION_MINIMUM=3.5                       # CMake 4 rejects egl_probe's old cmake_minimum_required
 
 STEPS=(prereq conda torch isaacsim isaaclab cyclonedds repos assets aalto verify)
 mkdir -p "$TP"
@@ -94,19 +95,22 @@ step_torch() {
 
 step_isaacsim() {
     activate
+    # No PIP_CONSTRAINT here: the freeze holds versions later steps upgraded past isaacsim's exact pins
+    # (urllib3, psutil, llvmlite, ...), so it is unresolvable at this step; later steps converge to it.
     # The 10.5 GB extension cache first, as its own step (= its own image layer in the Dockerfile).
     if [[ "${1:-}" != rest ]]; then
-        pip install "isaacsim-extscache-kit==6.2.0.0" --extra-index-url https://pypi.nvidia.com
+        env -u PIP_CONSTRAINT pip install "isaacsim-extscache-kit==6.2.0.0" --extra-index-url https://pypi.nvidia.com
     fi
     if [[ "${1:-}" != kit ]]; then
-        pip install "isaacsim[all,extscache]==6.2.0.0" --extra-index-url https://pypi.nvidia.com
+        env -u PIP_CONSTRAINT pip install "isaacsim[all,extscache]==6.2.0.0" --extra-index-url https://pypi.nvidia.com
     fi
 }
 
 step_isaaclab() {
     activate
     clone_at https://github.com/isaac-sim/IsaacLab.git "$TP/IsaacLab" "$ISAACLAB_REV"
-    (cd "$TP/IsaacLab" && ./isaaclab.sh --install)       # default = all (as on twinflow)
+    # No PIP_CONSTRAINT either: e.g. rl-games needs psutil<6 vs the freeze's 7.2.2 (same reason as isaacsim).
+    (cd "$TP/IsaacLab" && env -u PIP_CONSTRAINT ./isaaclab.sh --install)   # default = all (as on twinflow)
 }
 
 step_cyclonedds() {
