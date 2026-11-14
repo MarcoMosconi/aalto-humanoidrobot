@@ -263,7 +263,7 @@ const STAGES = [
   ["depth", "Depth", "Aligned depth, turbo colour over the 1–99 % range; black = no valid depth."],
   ["masks", "1 · HSV masks", "Per colour: cv2.inRange on HSV with the ranges on the left (red wraps around H=0), then a morphological opening. Note the orange bins light up in the yellow/red ranges."],
   ["keep", "2 · 3D keep mask", "Every valid depth pixel is deprojected to the pelvis frame. Dropped before grouping: grey = below 0.25 object heights (counter), magenta = above the max height (hands, arms), orange = inside a bin footprint + margin."],
-  ["blobs", "3 · Blobs + top face", "Mask ∧ keep → opening → connected components. Coloured fill = blob (dim = rejected, label = reason), white outline = eroded core used for depth, white pixels = top face (within top_band of the robust max height). Its depth²-weighted centre is the detection (green dot)."],
+  ["blobs", "3 · Blobs + top face", "Mask ∧ keep → opening → connected components. Coloured fill = blob (dim = rejected, label = reason), white outline = eroded core used for depth, white pixels = top face (within top_band of the robust max height). Its depth²-weighted centre is the detection (green dot). A top face larger than max_top_area is several touching objects: it is split with k-means, one dot per object (label \"split ×n\")."],
   ["result", "4 · Result vs GT", "Detections matched to sim ground truth per colour (Hungarian, 4 cm gate) — the same code as perception_eval. White ring = true top-face centre, dot = detection, MISS / FP / grey × = rejected blob."],
 ];
 function buildStagebar() {

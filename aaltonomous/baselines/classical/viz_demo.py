@@ -174,7 +174,8 @@ class Engine:
                 j = next((k for k, r in enumerate(rejs) if not r), 0)
                 det, rej = found[j], rejs[j]
                 info.update(status=rej or "detection", method=det.method, n_core=int(core.sum()),
-                            n_depth=int(ok.sum()), n_split=len(found))
+                            n_depth=int(ok.sum()), n_split=len(found),
+                            parts_uv=[_r(dt.uv, 1) for dt, r in zip(found, rejs) if not r])
                 if np.all(np.isfinite(det.top)):
                     info["top"] = _r(det.top)
                 info["uv"] = _r(det.uv, 1)
@@ -242,8 +243,11 @@ class Engine:
                 cv2.putText(b_img, info["status"][:16], (x, max(10, y - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33,
                             (180, 180, 180), 1)
             if ok:
-                u, v = int(info["uv"][0]), int(info["uv"][1])
-                cv2.circle(b_img, (u, v), 3, (0, 255, 0), -1)
+                for u, v in info.get("parts_uv") or [info["uv"]]:  # one dot per detection (several if split)
+                    cv2.circle(b_img, (int(u), int(v)), 3, (0, 255, 0), -1)
+                if info.get("n_split", 1) > 1:
+                    cv2.putText(b_img, f"split x{info['n_split']}", (x, max(10, y - 3)), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.33, (0, 255, 0), 1)
         imgs["blobs"] = _b64(b_img)
 
         why_s = ",".join(m["why"] for m in row["missed"])
