@@ -74,10 +74,26 @@ an event feed and the running score. `--policy classical` shows the stock planne
 
 ## Rung-1 grasp critic (classical + JEPA)
 
-`grasp.py`, `collect_grasps.py`, `crop_critic.py`, `grasp_eval.py`: the classical planner proposes grasp variants
-per object; V-JEPA 2 encodes a crop around the grasp, the action-conditioned predictor imagines approach + close +
-lift in latent space, a probe reads p(held) and the best candidate runs. On the full head frame "held" is barely
-readable even from the real lift-end latent (AUC 0.68); on the crop it is (0.93), so the critic works on crops.
+`grasp.py`, `collect_grasps.py`, `crop_critic.py`, `grasp_eval.py`. The classical planner proposes grasp variants
+per object (finger direction incl. yaw-aligned, xy shift, height). Data: `collect_grasps.py` runs the classical
+policy with random variants in the sim and labels every pick `held` (object near the hand >= 6 cm up at the lift
+end) and `delivered` (sorted count went up when the pick's trajectory ended); privileged sim state, training only.
+
+What works (`JepaVerifyPolicy`, `grasp_eval.py --policy verify`): a **V-JEPA 2 grasp verifier**. The pick is cut at
+the lift end, the head image is cropped around the hand (FK + calibration), V-JEPA 2 encodes it, a linear probe reads
+p(held). Below the threshold: open, go home (~3.5 s), retry the object with an untried variant (up to 6 attempts).
+On the full head frame "held" is barely readable (AUC 0.68); on the crop it is: AUC 0.94 on 444 sim grasps
+(5-fold by episode). `crop_critic.py verifier --latents ... [--label held|delivered]` fits it;
+`held_verifier_all_fa0.10.pt` = 10 % false aborts, 84 % of slips caught.
+
+What did not (yet): the **imagination critic** (predictor rollout of each candidate to the lift end + probe) reached
+AUC 0.65-0.68 (plain L1, outcome-aware loss), below a probe on the look crop alone (0.72), so it is not used. A
+**drop predictor** (held at lift -> dropped before the bin) on the real lift crop: AUC 0.80 with crop/colour/frame
+augmentation, but only 10 drop examples so far; `collect_grasps.py --prefer h0.35` oversamples drop-prone grasps.
+
+Rung 1, nominal sim, seeds 0-15 (classical 54/72 = 75 %): verify v1 (3 attempts) 16/23 vs 19/23 on matched seeds,
+v2 (+ held-rate variant prior) 6/10 vs 9/10, v3 (6 attempts) 34/46 vs 36/46 on 14 seeds, all stopped early;
+v4 (444-grasp verifier, 10 % false aborts) running. Run-to-run spread is about +-10 %.
 
 ## Design notes and known limits
 

@@ -104,7 +104,8 @@ def build(grasps, out, cfg):
             arm, hand = fa["arm_cmd"][j0:j1 + 1], fa["hand_cmd"][j0:j1 + 1]
             torch.save({"z": z, "state": torch.from_numpy(space.state(arm, hand)),
                         "action": torch.from_numpy(space.actions_from_commands(arm, hand)),
-                        "meta": {"episode": pj.stem, "pick": i, "held": p["held"], "variant": p["variant"],
+                        "meta": {"episode": pj.stem, "pick": i, "held": p["held"], "delivered": p.get("delivered"),
+                                 "variant": p["variant"],
                                  "success": None, "center": c.tolist()}, "name": dst.stem}, dst)
             n += 1
     print(f"[crop] {n} new pick sequences -> {out}")
@@ -228,7 +229,7 @@ def _load_picks(grasps, latents, space):
     return items
 
 
-def train_outcome(items, cfg, device, steps=1500, w_out=0.5, lam=0.05, seed=0, log=None):
+def train_outcome(items, cfg, device, steps=1500, w_out=0.5, lam=0.05, seed=0, log=None, out_every=2):
     """Predictor from scratch on `items`: teacher-forced + rollout L1 (train.py) and, per pick, the full rollout of
     its plan from the first crop must be read as `held` by a probe fitted on the REAL lift-end latents."""
     from .predictor import ACPredictor
@@ -256,7 +257,7 @@ def train_outcome(items, cfg, device, steps=1500, w_out=0.5, lam=0.05, seed=0, l
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.startswith("cuda")):
             l_tf, l_ro = losses(model, z, s, a, tc["rollout_steps"])
             loss = l_tf + l_ro
-        if w_out > 0:   # outcome term: full plan rollouts of a batch of picks (gradient through the rollout)
+        if w_out > 0 and step % out_every == 0:   # outcome term: full plan rollouts of a batch of picks (gradient through the rollout)
             idx = np.random.choice(len(items), min(16, len(items)), replace=False)
             acts = [items[i]["plan_act"] for i in idx]
             M = max(len(x) for x in acts)
@@ -302,6 +303,7 @@ def imagine_items(model, items, device):
 
 
 def cv_outcome(grasps, latents, device, folds=5, steps=1500, w_out=0.5, lam=0.05, out=None):
+    torch.set_num_threads(4)   # the loop is launch-bound: more CPU threads only spin against the sims
     cfg = load_config(None, {"predictor.context": 8, "train.rollout_steps": 4})
     items = _load_picks(grasps, latents, ActionSpace(cfg))
     y = np.array([d["held"] for d in items])
@@ -312,12 +314,14 @@ def cv_outcome(grasps, latents, device, folds=5, steps=1500, w_out=0.5, lam=0.05
     for k in range(folds):
         tr = [d for d, f in zip(items, fo) if f != k]
         te = [d for d, f in zip(items, fo) if f == k]
-        m = train_outcome(tr, cfg, device, steps, w_out, lam, seed=k)
+        t0 = __import__('time').time()
+        m = train_outcome(tr, cfg, device, steps, w_out, lam, seed=k, log=lambda x: print(f'[outcome cv] fold {k}{x}', flush=True))
         p = LinearProbe.fit(imagine_items(m, tr, device).to(device), y[fo != k], lam)
         s_img[fo == k] = p(imagine_items(m, te, device).to(device)).cpu().numpy()
         pl = LinearProbe.fit(torch.stack([d["z"][0] for d in tr]).to(device), y[fo != k], lam)
         s_look[fo == k] = pl(torch.stack([d["z"][0] for d in te]).to(device)).cpu().numpy()
-        print(f"[outcome cv] fold {k}: imagined AUC {auc(y[fo == k], s_img[fo == k]):.3f}", flush=True)
+        print(f"[outcome cv] fold {k}: imagined AUC {auc(y[fo == k], s_img[fo == k]):.3f} "
+              f"({__import__('time').time() - t0:.0f} s)", flush=True)
     rep = {"n": int(len(y)), "episodes": len(eps), "w_out": w_out, "steps": steps,
            "auc_imagined": round(auc(y, s_img), 3), "auc_look_only": round(auc(y, s_look), 3)}
     print("[outcome cv]", json.dumps(rep), flush=True)
@@ -331,6 +335,54 @@ def cv_outcome(grasps, latents, device, folds=5, steps=1500, w_out=0.5, lam=0.05
         torch.save({"probe": p.state(), "ckpt": ck, "report": rep, "half_full": HALF_FULL}, out)
         print(f"[outcome] saved {out} (+ {ck})")
     return rep
+
+
+# ------------------------------------------------------------------------------------------------ held verifier
+def fit_verifier(latents, out, device, folds=5, lam=0.05, max_false_abort=0.05, label="held"):
+    """Probe on the REAL lift-end crop latent -> p(label) (`held` after the lift, or `delivered` to the right bin).
+    Threshold = highest p below which at most `max_false_abort` of the positive grasps fall (cross-validated), i.e. it
+    aborts few good grasps."""
+    items = [torch.load(f, weights_only=False) for f in sorted(Path(latents).glob("*_pick*.pt"))]
+    items = [d for d in items if d["meta"].get(label) is not None]
+    Z = torch.stack([d["z"][-1] for d in items])
+    y = np.array([bool(d["meta"][label]) for d in items])
+    eps = sorted({d["meta"]["episode"] for d in items})
+    fmap = {e: i % folds for i, e in enumerate(np.random.default_rng(0).permutation(eps))}
+    fo = np.array([fmap[d["meta"]["episode"]] for d in items])
+    s = np.zeros(len(y))
+    for k in range(folds):
+        p = LinearProbe.fit(Z[fo != k].to(device), y[fo != k], lam)
+        s[fo == k] = p(Z[fo == k].to(device)).cpu().numpy()
+    thr = float(np.quantile(s[y], max_false_abort))
+    rep = {"label": label, "n": int(len(y)), "pos_rate": round(float(y.mean()), 3), "auc": round(auc(y, s), 3),
+           "threshold": round(thr, 3), "false_abort": round(float((s[y] < thr).mean()), 3),
+           "caught_slips": round(float((s[~y] < thr).mean()), 3)}
+    print("[verifier]", json.dumps(rep), flush=True)
+    p = LinearProbe.fit(Z.to(device), y, lam)
+    man = json.loads((Path(latents) / "manifest.json").read_text())
+    torch.save({"probe": p.state(), "threshold": thr, "report": rep, "encoder": man["encoder"],
+                "half_full": HALF_FULL}, out)
+    print(f"[verifier] saved {out}")
+    return rep
+
+
+class HeldVerifier:
+    """p(held) from the real head image right after the lift (crop around the plan's grasp window)."""
+
+    def __init__(self, path, device=None, encoder=None):
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        cp = torch.load(path, map_location=self.device, weights_only=False)
+        self.enc = encoder or make_encoder(cp["encoder"], self.device)
+        self.probe = LinearProbe(**{k: v.to(self.device) for k, v in cp["probe"].items()})
+        self.threshold = float(cp["threshold"])
+        self.kin, self.cal = _kin(), Calibration.load()
+
+    @torch.no_grad()
+    def p_held(self, obs, plan):
+        c = window_center(self.kin, plan.side, plan.arm, lift_end(plan))
+        img = crop(self.cal, downscale(np.asarray(obs["head_rgb"])), c)
+        self.last_crop = img
+        return float(self.probe(self.enc.encode({self.enc.cameras[0]: img[None]}))[0])
 
 
 # ------------------------------------------------------------------------------------------------ runtime
@@ -363,7 +415,7 @@ class CropGraspCritic:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["build", "probe", "outcome"])
+    ap.add_argument("cmd", choices=["build", "probe", "outcome", "verifier"])
     ap.add_argument("--grasps", default="runs/jepa/grasps")
     ap.add_argument("--latents", default="runs/jepa/crop_latents")
     ap.add_argument("--out", default=None)
@@ -372,10 +424,13 @@ def main(argv=None):
     ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--w-out", type=float, default=0.5, help="outcome loss weight (0 = plain L1 JEPA)")
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--label", choices=["held", "delivered"], default="held", help="verifier target")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     if a.cmd == "build":
         build(a.grasps, a.out or a.latents, load_config())
+    elif a.cmd == "verifier":
+        fit_verifier(a.latents, a.out or f"runs/jepa/{a.label}_verifier.pt", a.device, a.folds, a.lam, label=a.label)
     elif a.cmd == "outcome":
         cv_outcome(a.grasps, a.latents, a.device, a.folds, a.steps, a.w_out, a.lam, a.out)
     else:

@@ -23,8 +23,18 @@ from .data import save_episode
 from .grasp import ExploreGraspPolicy
 
 
-def held_now(sc, counter_z, dz):
+def lift_xy(pick):
+    """Pelvis xy of the hand's grasp point at the lift end (planned)."""
+    w = pick["plan"].waypoints
+    return w["grasp"][:2]
+
+
+def held_now(sc, counter_z, dz, near_xy=None, radius=0.08):
+    """Some active object's centre >= dz above the counter (and, with near_xy, within `radius` in xy of it: an object
+    stacked in a bin or on a rim is not 'held')."""
     objs = [o for o in sc.state()["objects"] if o.get("active")]
+    if near_xy is not None:
+        objs = [o for o in objs if np.hypot(o["pos"][0] - near_xy[0], o["pos"][1] - near_xy[1]) < radius]
     zs = [o["pos"][2] - counter_z for o in objs]
     return bool(zs and max(zs) >= dz), (max(zs) if zs else None)
 
@@ -36,6 +46,8 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--time-limit", type=float, default=120.0)
     ap.add_argument("--p-classical", type=float, default=0.3)
+    ap.add_argument("--prefer", default=None, help="variant name substring to try first (e.g. h0.35: more drops)")
+    ap.add_argument("--p-prefer", type=float, default=0.7)
     ap.add_argument("--held-z", type=float, default=0.06, help="object centre this far above the counter = held")
     ap.add_argument("--size", type=int, nargs=2, default=[240, 320])
     a = ap.parse_args(argv)
@@ -50,12 +62,13 @@ def main(argv=None):
                 continue
             env.rng = np.random.default_rng(seed)
             pol = ExploreGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, log=lambda m: None,
-                                     seed=seed, p_classical=a.p_classical)
+                                     seed=seed, p_classical=a.p_classical, prefer=a.prefer, p_prefer=a.p_prefer)
             t0 = time.monotonic()
             obs = env.reset()
             pol.reset({"instruction": obs["instruction"]})
             rec = {"head_rgb": [], "arm_q": [], "hand_q": [], "arm_cmd": [], "hand_cmd": [], "t": []}
             queue, tick, info, n_seen, checks, labels = [], 0, {}, 0, {}, {}
+            ends, delivered, n_ok_prev = {}, {}, 0
             while True:
                 if tick % k == 0:
                     rec["head_rgb"].append(_downscale(np.asarray(obs["head_rgb"]), tuple(a.size)))
@@ -66,7 +79,8 @@ def main(argv=None):
                     rec["t"].append(float(obs["t"]))
                 if tick in checks:
                     i = checks.pop(tick)
-                    labels[i] = held_now(sc, env.scene.counter_z, a.held_z)
+                    pk = pol.picks[i]
+                    labels[i] = held_now(sc, env.scene.counter_z, a.held_z, lift_xy(pk))
                 if not queue:
                     act = pol.act(obs)
                     if len(pol.picks) > n_seen:            # a pick starts executing with this chunk
@@ -75,6 +89,7 @@ def main(argv=None):
                             pk["tick0"] = tick
                             if pk["lift_end"] is not None:
                                 checks[tick + pk["lift_end"]] = i
+                            ends[tick + len(pk["plan"].arm)] = i
                         n_seen = len(pol.picks)
                     ar, hd = np.atleast_2d(act["arm_q_target"]), np.atleast_2d(act["hand_q_target"])
                     n = max(len(ar), len(hd))
@@ -83,6 +98,11 @@ def main(argv=None):
                     queue = [(ar[i], hd[i], bool(act.get("done")) and i == n - 1) for i in range(n)]
                 arm, hand, done = queue.pop(0)
                 obs, info = env.step({"arm_q_target": arm, "hand_q_target": hand, "done": done})
+                if tick in ends:   # pick's trajectory done: did the number of correctly sorted objects go up?
+                    i = ends.pop(tick)
+                    n_now = sum(o.get("outcome") == "correct" for o in sc.evaluate("sort_fixed")["outcomes"])
+                    delivered[i] = n_now > n_ok_prev
+                    n_ok_prev = n_now
                 tick += 1
                 if info["episode_over"]:
                     break
@@ -103,6 +123,7 @@ def main(argv=None):
                 arrays[f"arm0_{i}"], arrays[f"hand0_{i}"] = pk["arm0"], pk["hand0"]
                 arrays[f"arm_{i}"], arrays[f"hand_{i}"] = pk["plan"].arm[:le], pk["plan"].hand[:le]
                 pmeta.append({"i": i, "held": labels[i][0], "max_dz": labels[i][1], "variant": pk["variant"],
+                              "delivered": delivered.get(i),
                               "color": pk["plan"].color, "side": pk["plan"].side, "target": pk["plan"].target_bin,
                               "t": pk["t"], "lift_end": le, "tick0": pk.get("tick0"),
                               "grasp_xyz": [float(x) for x in pk["plan"].waypoints["grasp"]]})
@@ -110,7 +131,8 @@ def main(argv=None):
                 kk: meta[kk] for kk in ("n_correct", "n_objects", "outcomes")}})
             nh = sum(p["held"] for p in pmeta)
             print(f"[grasps] seed {seed}: {n_ok}/{len(env.layout)} correct, picks held {nh}/{len(pmeta)} "
-                  f"({', '.join(p['variant']['name'] + ('+' if p['held'] else '-') for p in pmeta)}) "
+                  f"delivered {sum(1 for p in pmeta if p.get('delivered'))}/{len(pmeta)} "
+                  f"({', '.join(p['variant']['name'] + ('+' if p['held'] else '-') + ('D' if p.get('delivered') else '') for p in pmeta)}) "
                   f"{time.monotonic() - t0:.0f} s", flush=True)
     finally:
         env.close()

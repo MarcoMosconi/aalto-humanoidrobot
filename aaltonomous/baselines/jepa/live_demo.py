@@ -200,9 +200,9 @@ def run(a, board):
                                           "hand_q_target": hd[min(j, len(hd) - 1)],
                                           "done": bool(act.get("done")) and j == n - 1})
                     if tick in checks:
-                        from .collect_grasps import held_now
+                        from .collect_grasps import held_now, lift_xy
                         i = checks.pop(tick)
-                        held[i] = held_now(sc, env.scene.counter_z, 0.06)[0]
+                        held[i] = held_now(sc, env.scene.counter_z, 0.06, lift_xy(pol.picks[i]))[0]
                         pk = pol.picks[i]
                         board.event(f"{pk['plan'].color} grasp ({pk['variant']['name']}): "
                                     f"{'HELD' if held[i] else 'slipped'} after the lift")

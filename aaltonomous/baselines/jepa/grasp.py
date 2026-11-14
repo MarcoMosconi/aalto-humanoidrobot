@@ -217,14 +217,19 @@ class _VariantPolicy(ClassicalPolicy):
 class ExploreGraspPolicy(_VariantPolicy):
     """Data collection: with prob. p_classical the stock plan, else a random valid variant."""
 
-    def __init__(self, *a, p_classical=0.3, **kw):
+    def __init__(self, *a, p_classical=0.3, prefer=None, p_prefer=0.7, **kw):
         super().__init__(*a, **kw)
         self.p_classical = p_classical
+        self.prefer, self.p_prefer = prefer, p_prefer   # e.g. "h0.35": oversample risky grasp families
 
     def choose(self, det, arm_q, hand_q, obstacles):
-        vs = make_variants(det, self.rng, n=self.n_variants)
-        if self.rng.random() < self.p_classical:
+        vs = make_variants(det, self.rng, n=64 if self.prefer else self.n_variants)
+        r = self.rng.random()
+        if r < self.p_classical:
             vs = vs[:1]
+        elif self.prefer and r < self.p_classical + (1 - self.p_classical) * self.p_prefer:
+            pref = [v for v in vs[1:] if self.prefer in v.name]
+            vs = pref + [v for v in vs[1:] if v not in pref] + vs[:1]
         else:
             vs = vs[1:] + vs[:1]   # a random variant first, the classical plan as fallback
         last = None
@@ -275,3 +280,162 @@ class JepaGraspPolicy(_VariantPolicy):
         self._note(float(self._look_obs.get("t", 0.0)), f"grasp critic {det.color}: " + ", ".join(
             f"{p.variant['name']}={s:.2f}" for p, s in zip(grasp, sc)) + f" -> {grasp[pick].variant['name']}")
         return grasp[pick]
+
+
+class JepaVerifyPolicy(_VariantPolicy):
+    """Classical + V-JEPA 2 grasp verifier (+ optional imagination critic).
+
+    Right after a pick's lift phase (the chunk is cut exactly there) the head image is cropped around the grasp and
+    the verifier reads p(held). Below its threshold the pick is aborted: the hand opens where it is, the arm goes home,
+    and the next look retries the object with a grasp variant not tried on it yet (critic-ranked when a critic is
+    given, else the make_variants order). A failed grasp then costs ~3 s instead of a full carry + drop + retreat.
+    """
+
+    def __init__(self, *a, verifier, critic=None, margin=0.05, max_attempts=3, prior=None, **kw):
+        ov = dict(kw.pop("overrides", None) or {})
+        ov.setdefault("policy.max_attempts", max_attempts)
+        super().__init__(*a, overrides=ov, **kw)
+        self.verifier, self.critic, self.margin = verifier, critic, margin
+        self.prior = prior            # {family: {rate}} (fit_variant_prior): try the best-holding grasp families first
+        self.reset()
+
+    def reset(self, info=None):
+        super().reset(info)
+        self.tried = []       # (xy, variant name) of aborted / finished grasps
+        self._exec = None
+        self.n_aborts = 0
+        self.verifications = []
+
+    # ---- choice
+    def _tried_here(self, det):
+        r = self.cfg["policy"]["same_object_radius"] * 1.5
+        return {n for xy, n in self.tried if np.linalg.norm(np.asarray(xy) - det.top[:2]) < r}
+
+    def choose(self, det, arm_q, hand_q, obstacles):
+        skip = self._tried_here(det)
+        plans, last = [], None
+        vs = make_variants(det, None, n=64)
+        if self.prior is not None:
+            vs = order_by_prior(vs, self.prior)
+        for v in vs:
+            if v.name in skip:
+                continue
+            p = plan_variant(self._inner, det, v, arm_q, hand_q, obstacles)
+            if p.ok:
+                p.variant = v.as_dict()
+                plans.append(p)
+            else:
+                last = last or p
+            if self.critic is None and plans:
+                break                                   # no critic: first untried variant that plans
+            if len(plans) >= self.n_variants:
+                break
+        self._cands = [p for p in plans if lift_end(p) is not None]
+        if not plans:
+            return last
+        grasp = self._cands
+        if self.critic is None or len(grasp) <= 1:
+            return plans[0]
+        sc = np.asarray(self.critic.score_plans(self._look_obs, arm_q, hand_q, grasp))
+        for p in grasp:
+            p.scores = [round(float(x), 3) for x in sc]
+        best = float(sc.max())
+        pick = 0 if (grasp[0].variant["name"] == "classical" and sc[0] >= best - self.margin) else int(sc.argmax())
+        self._note(float(self._look_obs.get("t", 0.0)), f"grasp critic {det.color}: " + ", ".join(
+            f"{p.variant['name']}={s:.2f}" for p, s in zip(grasp, sc)) + f" -> {grasp[pick].variant['name']}")
+        return grasp[pick]
+
+    # ---- execution with the check after the lift
+    def _start(self, plan, t):
+        out = super()._start(plan, t)
+        le = lift_end(plan)
+        self._exec = None if le is None or plan.target_bin == "counter" else \
+            {"plan": plan, "total": len(plan.arm), "lift_end": le, "checked": False}
+        return out
+
+    def _executed(self):
+        return self._exec["total"] - (len(self.queue_a) if self.queue_a is not None else 0)
+
+    def _pop(self):
+        e = self._exec
+        if e is not None and not e["checked"] and self.queue_a is not None and len(self.queue_a):
+            left = e["lift_end"] - self._executed()
+            if 0 < left < int(self.cfg["motion"]["chunk"]):   # end this chunk exactly at the lift end
+                a, h = self.queue_a[:left], self.queue_h[:left]
+                self.queue_a, self.queue_h = self.queue_a[left:], self.queue_h[left:]
+                self.arm_cmd, self.hand_cmd = a[-1].copy(), h[-1].copy()
+                return {"arm_q_target": a.copy(), "hand_q_target": h.copy(), "done": False}
+        return super()._pop()
+
+    def act(self, obs):
+        e = self._exec
+        if e is not None and not e["checked"] and self.state == "executing" and self._executed() >= e["lift_end"]:
+            e["checked"] = True
+            plan = e["plan"]
+            p = self.verifier.p_held(obs, plan)
+            t = float(obs.get("t", 0.0))
+            xy = plan.waypoints["grasp"][:2]
+            self.tried.append((xy, plan.variant["name"]))
+            self.verifications.append({"t": t, "color": plan.color, "variant": plan.variant["name"], "p_held": p,
+                                       "abort": p < self.verifier.threshold})
+            if p < self.verifier.threshold:
+                self.n_aborts += 1
+                self._note(t, f"verify {plan.color} ({plan.variant['name']}): p(held)={p:.2f} < "
+                              f"{self.verifier.threshold:.2f} -> abort, retry with another grasp")
+                self._abort(plan)
+            else:
+                self._note(t, f"verify {plan.color}: p(held)={p:.2f} -> carry on")
+        return super().act(obs)
+
+    def _abort(self, plan):
+        from aaltonomous.baselines.classical.kinematics import ArmKinematics
+        sl = ArmKinematics.sl(plan.side)
+        hand_rel = self.hand_cmd.copy()
+        hand_rel[sl] = self.post[self.cfg["grasp"].get("release_posture", "preshape")][sl]
+        hand_open = self.hand_cmd.copy()
+        hand_open[sl] = self.post["open"][sl]
+        home = self.arm_cmd.copy()
+        home[sl] = self.home[sl]
+        a1, h1 = self._inner.go_to(self.arm_cmd, self.hand_cmd, self.arm_cmd, hand_rel)   # let go where it is
+        hold = int(round(0.3 * 30))
+        a1 = np.vstack([a1, np.repeat(self.arm_cmd[None], hold, 0)])
+        h1 = np.vstack([h1, np.repeat(hand_rel[None], hold, 0)])
+        a2, h2 = self._inner.go_to(self.arm_cmd, hand_rel, home, hand_open)
+        self._enqueue(np.vstack([a1, a2]), np.vstack([h1, h2]))
+        self._exec = None
+
+
+# --------------------------------------------------------------------------------------------- data-driven variant order
+def variant_family(v):
+    """Coarse family of a variant dict / Variant: finger direction band x grasp height (or shift / classical)."""
+    d = v.as_dict() if isinstance(v, Variant) else v
+    n = d["name"]
+    if n == "classical":
+        return "classical"
+    if n.startswith("shift"):
+        return "shift"
+    h = d["hint_deg"]
+    band = "fwd" if h > -20 else "diag" if h > -55 else "inward"
+    return f"{band}_h{d['height_frac']}"
+
+
+def fit_variant_prior(picks_dir, out=None, alpha=2.0):
+    """Held rate per family from collect_grasps.py picks, shrunk towards the overall rate (alpha pseudo-counts)."""
+    import glob
+    import json
+    rows = [p for f in glob.glob(f"{picks_dir}/*.json") for p in json.load(open(f))["picks"]]
+    base = float(np.mean([p["held"] for p in rows]))
+    fam = {}
+    for p in rows:
+        fam.setdefault(variant_family(p["variant"]), []).append(p["held"])
+    prior = {k: {"n": len(v), "rate": round((sum(v) + alpha * base) / (len(v) + alpha), 3)} for k, v in fam.items()}
+    prior["_base"] = {"n": len(rows), "rate": round(base, 3)}
+    if out:
+        with open(out, "w") as f:
+            json.dump(prior, f, indent=1)
+    return prior
+
+
+def order_by_prior(variants, prior):
+    base = prior.get("_base", {}).get("rate", 0.5)
+    return sorted(variants, key=lambda v: -prior.get(variant_family(v), {}).get("rate", base))
