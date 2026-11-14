@@ -14,6 +14,7 @@ arm can finish. Rung 1 only: ignores shape and the instruction text. Meant as a 
 | `policy_server.py` | The same policy behind the submission protocol (port 8000) = **reference submission** |
 | `config.yaml` | Everything tunable (HSV ranges, grasp, home pose, speeds, hand postures); `profiles.sim` = sim-tuned overrides |
 | `run.py`, `sim_eval.py`, `mock_world.py` | In-process runs: mock world / real robot, Isaac sim scoring, rendered mock |
+| `viz_demo.py` + `viz_demo.html` | Browser viewer: perception stages live on saved RGB-D frames (editable params, metrics vs stock), FK replay of evaluator episodes |
 
 ## Numbers (2026-11-11, nominal sim = DR off, rung 1)
 
@@ -47,6 +48,9 @@ python -m aaltonomous.baselines.classical.run --backend mock --seed 3          #
 python -m aaltonomous.baselines.classical.run --backend mock --dry-run         # detections + plans, no motion
 python -m aaltonomous.baselines.classical.sim_eval --seeds 0 1 2 3 4 5 6 7    # Isaac sim running (2nd instance: AALTO_* env vars)
 python -m unittest aaltonomous/baselines/classical/test_classical.py
+
+# browser viewer on saved data (no sim): perception_eval --raw frames + evaluator episodes -> http://localhost:8765
+python -m aaltonomous.baselines.classical.viz_demo --frames runs/perception_eval_raw --episodes runs/eval
 
 # as a policy server / submission image (CPU only, ~1.5 GB, up in < 2 s)
 python -m aaltonomous.baselines.classical.policy_server                        # :8000 (PORT env to change)

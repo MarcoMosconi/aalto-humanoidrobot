@@ -278,8 +278,8 @@ def classify_miss(g, rgb, depth, per, pairs, scene):
     return "detector"
 
 
-def evaluate_frame(per, scene, rgb, depth, gt, scen, i, lay, still, out):
-    import cv2
+def frame_row(per, scene, rgb, depth, gt, scen, i, lay, still):
+    """Detect + match one frame. Returns (row, pairs, missed, false_pos, rejected); row is a frames.jsonl line."""
     t = time.perf_counter()
     dets, rejected = per.detect(rgb, depth, debug=True)
     dt_ms = (time.perf_counter() - t) * 1000
@@ -301,6 +301,14 @@ def evaluate_frame(per, scene, rgb, depth, gt, scen, i, lay, still, out):
            "missed": [{"name": g["name"], "shape": g["shape"], "top": g["top"],
                        "why": classify_miss(g, rgb, depth, per, pairs, scene)} for g in missed],
            "false_pos": [repr(d) for d in fps], "rejected": [why for _, why in rejected]}
+    return row, pairs, missed, fps, rejected
+
+
+def evaluate_frame(per, scene, rgb, depth, gt, scen, i, lay, still, out):
+    import cv2
+    row, pairs, missed, fps, rejected = frame_row(per, scene, rgb, depth, gt, scen, i, lay, still)
+    n_gt = row["n_gt"]
+    ms = row["matches"]
     why = ",".join(m["why"] for m in row["missed"])
     title = f"{scen} #{i}: {len(pairs)}/{n_gt} found, {len(fps)} FP" + (f"  miss: {why}" if why else "")
     cv2.imwrite(str(out / "img" / f"{scen}_{i:02d}.jpg"),

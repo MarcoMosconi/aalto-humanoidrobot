@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classical Baseline Viewer</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --panel2: #f0f0ed; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6;
+  --accent: #2f6fdf; --good: #1f9d55; --warn: #d98a00; --bad: #d23c3c; --canvas: #eceae4;
+  --left: #0f9d9a; --right: #8a4fd8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141413; --panel: #1d1d1b; --panel2: #262624; --ink: #ecebe6; --muted: #9a9993; --line: #34342f;
+    --accent: #6e9cf0; --good: #3fbf75; --warn: #f0a92a; --bad: #ef6060; --canvas: #10100f;
+    --left: #33c2bf; --right: #ad7cf2;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141413; --panel: #1d1d1b; --panel2: #262624; --ink: #ecebe6; --muted: #9a9993; --line: #34342f;
+  --accent: #6e9cf0; --good: #3fbf75; --warn: #f0a92a; --bad: #ef6060; --canvas: #10100f;
+  --left: #33c2bf; --right: #ad7cf2;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.tabs { display: flex; gap: 4px; }
+.tabs button, .seg button { background: none; border: 1px solid transparent; color: var(--muted); padding: 5px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.tabs button.on, .seg button.on { background: var(--panel2); color: var(--ink); border-color: var(--line); }
+#status { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+#status.busy::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 6px; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+main { padding: 12px 16px 40px; }
+.view { display: none; } .view.on { display: block; }
+.grid { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 12px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card h2 .sp { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.stack { display: grid; gap: 12px; min-width: 0; }
+.frames .scen { margin-bottom: 8px; }
+.frames .scen b { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip { min-width: 34px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel2); cursor: pointer; font: 11px/1.2 ui-monospace, monospace; text-align: center; color: var(--ink); }
+.chip.ok { border-color: color-mix(in srgb, var(--good) 60%, transparent); }
+.chip.miss { border-color: color-mix(in srgb, var(--bad) 70%, transparent); background: color-mix(in srgb, var(--bad) 12%, var(--panel2)); }
+.chip.on { outline: 2px solid var(--accent); outline-offset: 0; }
+.chip small { display: block; color: var(--muted); font-size: 9px; }
+.params label { display: grid; grid-template-columns: 1fr 74px; align-items: center; gap: 6px; margin: 3px 0; color: var(--muted); }
+.params input[type=number] { width: 100%; background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font: 12px ui-monospace, monospace; }
+.params input.changed { border-color: var(--accent); color: var(--accent); }
+.hsvrow { display: grid; grid-template-columns: 16px repeat(4, 1fr); gap: 3px; align-items: center; margin: 2px 0; }
+.hsvrow span.sw { width: 12px; height: 12px; border-radius: 3px; }
+.hsvhead { display: grid; grid-template-columns: 16px repeat(4, 1fr); gap: 3px; font-size: 10px; color: var(--muted); }
+.btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.btn { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); padding: 4px 10px; border-radius: 5px; cursor: pointer; font: inherit; }
+.btn:hover { border-color: var(--accent); }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin: 6px 0 2px; }
+.two { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 12px; }
+.stagebar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.stagebar button { font-size: 12px; padding: 4px 9px; }
+.imgwrap { position: relative; background: var(--canvas); border-radius: 6px; overflow: hidden; }
+.imgwrap canvas, .topwrap canvas { display: block; width: 100%; }
+.readout { font: 11px/1.4 ui-monospace, monospace; color: var(--muted); min-height: 32px; margin-top: 6px; white-space: pre-wrap; }
+.explain { color: var(--muted); margin: 6px 0 0; font-size: 12px; }
+.topwrap { position: relative; background: var(--canvas); border-radius: 6px; overflow: hidden; cursor: grab; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 11px; }
+td.num, th.num { text-align: right; }
+.tblwrap { overflow-x: auto; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); } .mut { color: var(--muted); }
+.delta { font-size: 11px; margin-left: 4px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.kpi { background: var(--panel2); border-radius: 6px; padding: 6px 10px; }
+.kpi b { display: block; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi span { color: var(--muted); font-size: 11px; }
+.ep-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ep-controls select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; font: inherit; max-width: 100%; }
+.ep-controls input[type=range] { flex: 1; min-width: 160px; }
+#epTime { font: 12px ui-monospace, monospace; min-width: 120px; }
+.ep-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+.err { color: var(--bad); white-space: pre-wrap; }
+@media (max-width: 1100px) { .two, .ep-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } main { padding: 10px 16px 40px; } header { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Classical baseline viewer</h1>
+  <div class="tabs"><button data-view="perc" class="on">Perception</button><button data-view="ep">Episodes</button></div>
+  <span id="status">loading…</span>
+</header>
+<main>
+<section id="perc" class="view on">
+  <div class="grid">
+    <div class="stack">
+      <div class="card frames"><h2>Frames <span class="sp mut" id="framesNote"></span></h2><div id="frameList"></div></div>
+      <div class="card params"><h2>Perception params <span class="sp mut">config.yaml</span></h2>
+        <div id="params"></div>
+        <div class="btns"><button class="btn" id="resetBtn">Reset to stock</button><button class="btn" id="copyBtn">Copy --set</button></div>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="two">
+        <div class="card"><h2>Pipeline in the head camera <span class="sp mut" id="frameTitle"></span></h2>
+          <div class="stagebar seg" id="stagebar"></div>
+          <div class="imgwrap"><canvas id="imgCanvas" width="640" height="480"></canvas></div>
+          <div class="readout" id="readout">hover the image: pixel, HSV, depth, pelvis-frame point</div>
+          <p class="explain" id="stageExplain"></p>
+        </div>
+        <div class="card"><h2>Top-down, pelvis frame <span class="sp"><span class="seg" id="cloudMode"><button data-m="rgb" class="on">rgb</button><button data-m="z">height</button><button data-m="off">off</button></span></span></h2>
+          <div class="topwrap"><canvas id="topCanvas" width="600" height="600"></canvas></div>
+          <div class="legend"><span><i style="border:2px solid var(--ink);background:none"></i>ground truth</span><span><i style="background:var(--good)"></i>&lt;1 cm</span><span><i style="background:var(--warn)"></i>&lt;2 cm</span><span><i style="background:var(--bad)"></i>worse / missed</span><span><i style="background:#d040d0;border-radius:2px"></i>false positive</span><span>scroll: zoom · drag: pan · dbl-click: reset</span></div>
+        </div>
+      </div>
+      <div class="card"><h2>Objects in this frame</h2><div class="tblwrap" id="objTable"></div></div>
+      <div class="card"><h2>All frames with these params <span class="sp mut" id="allNote"></span></h2><div id="allKpis" class="kpis"></div><div class="tblwrap" id="allTable"></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="ep" class="view">
+  <div class="stack">
+    <div class="card">
+      <div class="ep-controls">
+        <select id="epSelect"></select>
+        <button class="btn" id="playBtn">▶ Play</button>
+        <span class="seg" id="speedSeg"><button data-s="1">1×</button><button data-s="4" class="on">4×</button><button data-s="10">10×</button></span>
+        <input type="range" id="epSlider" min="0" max="0" value="0">
+        <span id="epTime"></span>
+      </div>
+      <div class="explain" id="epSummary"></div>
+    </div>
+    <div class="ep-grid">
+      <div class="card"><h2>Top-down: FK of measured joints <span class="sp mut">shoulder → elbow → wrist → palm → grasp point</span></h2>
+        <div class="topwrap"><canvas id="epTop" width="600" height="560"></canvas></div>
+        <div class="legend"><span><i style="background:var(--left)"></i>left arm</span><span><i style="background:var(--right)"></i>right arm</span><span>filled grasp dot = hand closed</span><span><i style="border:1.5px dashed var(--muted);background:none"></i>object at start</span><span><i style="background:var(--muted)"></i>object at end (✓ correct)</span></div>
+      </div>
+      <div class="stack">
+        <div class="card"><h2>Side view (x forward, z up)</h2><div class="topwrap"><canvas id="epSide" width="500" height="300"></canvas></div></div>
+        <div class="card"><h2>Timeline <span class="sp mut">click to seek</span></h2><div class="topwrap" style="cursor:pointer"><canvas id="epTL" width="500" height="300"></canvas></div>
+          <div class="legend"><span>grip = hand posture between config open (0) and closed (1), below 0 = opened wide to release · grasp-point height · max |cmd − measured| arm joint · safety clips</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const OBJ = { red: "#e63232", yellow: "#f0d21e", blue: "#2878eb" };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let G = null, STOCK = null, P = null;          // geometry, stock perception cfg, current perception cfg
+let cur = null, curName = null, stage = "result", allStock = null, allCur = null;
+const setStatus = (t, busy) => { const s = $("#status"); s.textContent = t; s.classList.toggle("busy", !!busy); };
+
+async function api(path) {
+  const r = await fetch(path); const j = await r.json();
+  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  return j;
+}
+function img(src) { return new Promise(res => { const i = new Image(); i.onload = () => res(i); i.src = src; }); }
+function fitCanvas(cv, aspect) {
+  const w = cv.parentElement.clientWidth, dpr = window.devicePixelRatio || 1;
+  const h = Math.round(w * aspect);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  cv.style.height = h + "px";
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [ctx, w, h];
+}
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === b.dataset.view));
+  if (b.dataset.view === "ep" && !EP.data) loadEpisode($("#epSelect").value); else drawEp();
+});
+
+// ---------------------------------------------------------------- params
+const SCALARS = [
+  ["open_px", "opening kernel (px)", 1], ["erode_px", "erode before depth (px)", 1], ["min_area_px", "min blob area (px)", 10],
+  ["min_valid_depth_px", "min depth px (else plane)", 5], ["top_band", "top band (m)", 0.001], ["top_percentile", "top percentile", 1],
+  ["height_range.0", "min height (sizes)", 0.05], ["height_range.1", "max height (sizes)", 0.1],
+  ["bin_pixel_margin", "bin pixel margin (m)", 0.001], ["bin_exclusion_margin", "bin centre margin (m)", 0.005],
+  ["counter_margin", "mat margin (m)", 0.005], ["xy_offset.0", "xy_offset x (m)", 0.001], ["xy_offset.1", "xy_offset y (m)", 0.001],
+];
+const getK = (o, k) => k.split(".").reduce((a, s) => a[s], o);
+const setK = (o, k, v) => { const p = k.split("."); const last = p.pop(); p.reduce((a, s) => a[s], o)[last] = v; };
+function buildParams() {
+  const el = $("#params"); el.innerHTML = "";
+  const hsv = document.createElement("div");
+  hsv.innerHTML = `<div class="hsvhead"><span></span><span>H lo</span><span>H hi</span><span>S min</span><span>V min</span></div>`;
+  for (const [color, ranges] of Object.entries(P.hsv)) ranges.forEach((rg, ri) => {
+    const row = document.createElement("div"); row.className = "hsvrow";
+    row.innerHTML = `<span class="sw" style="background:${OBJ[color]}" title="${color}"></span>`;
+    [["0.0", 180], ["1.0", 180], ["0.1", 255], ["0.2", 255]].forEach(([path, max]) => {
+      const [a, b] = path.split(".").map(Number);
+      const inp = document.createElement("input"); inp.type = "number"; inp.min = 0; inp.max = max; inp.step = 1;
+      inp.value = rg[a][b]; inp.dataset.k = `hsv.${color}.${ri}.${a}.${b}`;
+      inp.oninput = () => { rg[a][b] = Number(inp.value); markChanged(inp); schedule(); };
+      row.appendChild(inp); markChanged(inp);
+    });
+    hsv.appendChild(row);
+  });
+  el.appendChild(hsv);
+  const det = document.createElement("details"); det.open = true;
+  det.innerHTML = "<summary>blobs, depth, rejection, offset</summary>";
+  for (const [k, label, step] of SCALARS) {
+    const l = document.createElement("label"); l.innerHTML = `<span>${label}</span>`;
+    const inp = document.createElement("input"); inp.type = "number"; inp.step = step; inp.value = getK(P, k); inp.dataset.k = k;
+    inp.oninput = () => { if (inp.value === "") return; setK(P, k, Number(inp.value)); markChanged(inp); schedule(); };
+    l.appendChild(inp); det.appendChild(l); markChanged(inp);
+  }
+  el.appendChild(det);
+}
+function markChanged(inp) { inp.classList.toggle("changed", String(getK(P, inp.dataset.k)) !== String(getK(STOCK, inp.dataset.k))); }
+function overrides() {
+  const o = {};
+  if (JSON.stringify(P.hsv) !== JSON.stringify(STOCK.hsv)) o["perception.hsv"] = P.hsv;
+  for (const [k] of SCALARS) { const top = k.split(".")[0]; if (JSON.stringify(P[top]) !== JSON.stringify(STOCK[top])) o["perception." + top] = P[top]; }
+  return o;
+}
+$("#resetBtn").onclick = () => { P = structuredClone(STOCK); buildParams(); schedule(); };
+$("#copyBtn").onclick = () => { const t = `--set '${JSON.stringify(overrides())}'`; navigator.clipboard?.writeText(t); setStatus("copied: " + t.slice(0, 80)); };
+
+let timer = null, seq = 0;
+function schedule() { clearTimeout(timer); timer = setTimeout(() => { loadFrame(curName); runAll(); }, 300); }
+
+// ---------------------------------------------------------------- frames
+function buildFrameList() {
+  const by = {};
+  for (const f of window.FRAMES) { const [s, i] = [f.slice(0, f.lastIndexOf("_")), f.slice(f.lastIndexOf("_") + 1)]; (by[s] ||= []).push([f, i]); }
+  const el = $("#frameList"); el.innerHTML = "";
+  for (const [s, list] of Object.entries(by)) {
+    const d = document.createElement("div"); d.className = "scen"; d.innerHTML = `<b>${s}</b>`;
+    const chips = document.createElement("div"); chips.className = "chips";
+    for (const [f, i] of list) {
+      const c = document.createElement("button"); c.className = "chip"; c.dataset.f = f; c.innerHTML = `${i}<small>…</small>`;
+      c.onclick = () => loadFrame(f); chips.appendChild(c);
+    }
+    d.appendChild(chips); el.appendChild(d);
+  }
+  $("#framesNote").textContent = `${window.FRAMES.length} saved RGB-D frames`;
+}
+function updateChips() {
+  document.querySelectorAll(".chip").forEach(c => {
+    c.classList.toggle("on", c.dataset.f === curName);
+    const r = allCur?.frames[c.dataset.f]; if (!r) return;
+    const bad = r.n < r.n_gt || r.fp > 0;
+    c.classList.toggle("miss", bad); c.classList.toggle("ok", !bad);
+    c.querySelector("small").textContent = `${r.n}/${r.n_gt}${r.fp ? " +" + r.fp : ""}`;
+  });
+}
+
+const STAGES = [
+  ["rgb", "RGB", "Head camera colour frame (sim, 640×480)."],
+  ["depth", "Depth", "Aligned depth, turbo colour over the 1–99 % range; black = no valid depth."],
+  ["masks", "1 · HSV masks", "Per colour: cv2.inRange on HSV with the ranges on the left (red wraps around H=0), then a morphological opening. Note the orange bins light up in the yellow/red ranges."],
+  ["keep", "2 · 3D keep mask", "Every valid depth pixel is deprojected to the pelvis frame. Dropped before grouping: grey = below 0.25 object heights (counter), magenta = above the max height (hands, arms), orange = inside a bin footprint + margin."],
+  ["blobs", "3 · Blobs + top face", "Mask ∧ keep → opening → connected components. Coloured fill = blob (dim = rejected, label = reason), white outline = eroded core used for depth, white pixels = top face (within top_band of the robust max height). Its depth²-weighted centre is the detection (green dot)."],
+  ["result", "4 · Result vs GT", "Detections matched to sim ground truth per colour (Hungarian, 4 cm gate) — the same code as perception_eval. White ring = true top-face centre, dot = detection, MISS / FP / grey × = rejected blob."],
+];
+function buildStagebar() {
+  const bar = $("#stagebar");
+  for (const [k, label] of STAGES) {
+    const b = document.createElement("button"); b.textContent = label; b.dataset.s = k; b.classList.toggle("on", k === stage);
+    b.onclick = () => { stage = k; bar.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); drawImage(); };
+    bar.appendChild(b);
+  }
+}
+
+const IMG = {}; let rgbData = null, depthData = null;
+async function loadFrame(name) {
+  curName = name; updateChips();
+  const my = ++seq; setStatus(`running perception on ${name}…`, true);
+  try {
+    const set = encodeURIComponent(JSON.stringify(overrides()));
+    const t0 = performance.now();
+    const d = await api(`/api/frame?name=${name}&set=${set}`);
+    if (my !== seq) return;
+    const entries = await Promise.all(Object.entries(d.images).map(async ([k, v]) => [k, await img(v)]));
+    for (const [k, v] of entries) IMG[k] = v;
+    rgbData = pixels(IMG.rgb); depthData = pixels(IMG.depth_raw);
+    cur = d; $("#frameTitle").textContent = `${name} · detect ${d.row.detect_ms} ms`;
+    drawImage(); drawTop(); objTable();
+    setStatus(`${name}: ${d.row.n_matched}/${d.row.n_gt} found · ${(performance.now() - t0).toFixed(0)} ms round trip`);
+  } catch (e) { setStatus("error: " + e.message); $("#objTable").innerHTML = `<div class="err">${e.message}</div>`; }
+}
+function pixels(im) { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(im, 0, 0); return x.getImageData(0, 0, im.width, im.height).data; }
+
+let hoverUV = null;
+function drawImage() {
+  const cv = $("#imgCanvas"); const [ctx, w, h] = fitCanvas(cv, 0.75);
+  ctx.fillStyle = css("--canvas"); ctx.fillRect(0, 0, w, h);
+  const im = IMG[stage]; if (im) ctx.drawImage(im, 0, 0, w, h);
+  $("#stageExplain").textContent = STAGES.find(s => s[0] === stage)[2];
+  if (hoverUV) { const [u, v] = hoverUV; const s = w / 640; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(u * s - 6, v * s - 6, 12, 12); }
+}
+function rgb2hsv(r, g, b) {   // OpenCV 8-bit convention: H 0-180, S/V 0-255
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0; if (d) { if (mx === r) h = 60 * ((g - b) / d); else if (mx === g) h = 60 * ((b - r) / d) + 120; else h = 60 * ((r - g) / d) + 240; }
+  if (h < 0) h += 360;
+  return [Math.round(h / 2), mx ? Math.round(255 * d / mx) : 0, mx];
+}
+function pixToPelvis(u, v, dmm) {
+  const K = G.K, T = G.T, z = dmm * G.depth_scale;
+  const p = [(u - K[0][2]) / K[0][0] * z, (v - K[1][2]) / K[1][1] * z, z];
+  return [0, 1, 2].map(i => T[i][0] * p[0] + T[i][1] * p[1] + T[i][2] * p[2] + T[i][3]);
+}
+$("#imgCanvas").addEventListener("mousemove", ev => {
+  if (!rgbData) return;
+  const r = ev.target.getBoundingClientRect();
+  const u = Math.floor((ev.clientX - r.left) / r.width * 640), v = Math.floor((ev.clientY - r.top) / r.height * 480);
+  if (u < 0 || v < 0 || u >= 640 || v >= 480) return;
+  hoverUV = [u, v]; drawImage(); drawTop();
+  const i = (v * 640 + u) * 4, [R, Gc, B] = [rgbData[i], rgbData[i + 1], rgbData[i + 2]];
+  const [H, S, V] = rgb2hsv(R, Gc, B);
+  const dmm = depthData[i] * 256 + depthData[i + 1];
+  const pass = Object.entries(P.hsv).filter(([, rs]) => rs.some(([lo, hi]) => H >= lo[0] && H <= hi[0] && S >= lo[1] && S <= hi[1] && V >= lo[2] && V <= hi[2])).map(x => x[0]);
+  let s = `u,v ${u},${v}   rgb ${R},${Gc},${B}   HSV ${H},${S},${V}   mask: ${pass.join(",") || "none"}`;
+  if (dmm >= P.depth_range_mm[0] && dmm <= P.depth_range_mm[1]) {
+    const p = pixToPelvis(u, v, dmm);
+    s += `\ndepth ${dmm} mm   pelvis (${p.map(x => x.toFixed(3)).join(", ")}) m   height above counter ${((p[2] - G.counter_z) * 1000).toFixed(0)} mm (${((p[2] - G.counter_z) / G.object_height).toFixed(2)} sizes)`;
+  } else s += `\ndepth: none`;
+  $("#readout").textContent = s;
+});
+$("#imgCanvas").addEventListener("mouseleave", () => { hoverUV = null; drawImage(); drawTop(); });
+
+// ---------------------------------------------------------------- top-down view (shared transform)
+function makeView(x0, x1, y0, y1) { return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, span: Math.max(x1 - x0, y1 - y0), init: [x0, x1, y0, y1] }; }
+const TV = makeView(0.02, 0.78, -0.45, 0.45);
+function tf(view, w, h) {   // pelvis (x fwd, y left) -> screen (robot at bottom facing up, its left on screen left)
+  const s = Math.min(w, h) / view.span;
+  return (x, y) => [w / 2 - (y - view.cy) * s, h / 2 - (x - view.cx) * s];
+}
+function attachPanZoom(cv, view, redraw) {
+  let drag = null;
+  cv.addEventListener("wheel", ev => { ev.preventDefault(); view.span *= ev.deltaY > 0 ? 1.15 : 1 / 1.15; redraw(); }, { passive: false });
+  cv.addEventListener("mousedown", ev => { drag = [ev.clientX, ev.clientY, view.cx, view.cy]; cv.parentElement.style.cursor = "grabbing"; });
+  window.addEventListener("mouseup", () => { drag = null; cv.parentElement.style.cursor = ""; });
+  cv.addEventListener("mousemove", ev => {
+    if (!drag) return; const r = cv.getBoundingClientRect(); const s = Math.min(r.width, r.height) / view.span;
+    view.cx = drag[2] + (ev.clientY - drag[1]) / s; view.cy = drag[3] + (ev.clientX - drag[0]) / s; redraw();
+  });
+  cv.addEventListener("dblclick", () => { const [a, b, c, d] = view.init; Object.assign(view, makeView(a, b, c, d)); redraw(); });
+}
+function drawScene(ctx, T) {
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = css("--line"); ctx.beginPath(); G.mat.forEach((p, i) => { const [a, b] = T(p[0], p[1]); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.closePath(); ctx.stroke();
+  // 5 cm grid on the mat
+  ctx.globalAlpha = 0.35;
+  const xs = G.mat.map(p => p[0]), ys = G.mat.map(p => p[1]);
+  for (let x = Math.ceil(Math.min(...xs) * 20) / 20; x <= Math.max(...xs); x += 0.05) { const [a, b] = T(x, Math.min(...ys)), [c, d] = T(x, Math.max(...ys)); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); }
+  for (let y = Math.ceil(Math.min(...ys) * 20) / 20; y <= Math.max(...ys); y += 0.05) { const [a, b] = T(Math.min(...xs), y), [c, d] = T(Math.max(...xs), y); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#e6782a"; ctx.lineWidth = 1.5; ctx.fillStyle = css("--muted"); ctx.font = "11px system-ui";
+  for (const [n, poly] of Object.entries(G.bins)) {
+    ctx.beginPath(); poly.forEach((p, i) => { const [a, b] = T(p[0], p[1]); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.closePath(); ctx.stroke();
+    const c = poly.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4], [0, 0]); const [a, b] = T(c[0] + 0.085, c[1]);
+    ctx.textAlign = "center"; ctx.fillText(n + " bin", a, b);
+  }
+  // robot pelvis marker
+  const [ox, oy] = T(0, 0); ctx.fillStyle = css("--muted"); ctx.beginPath(); ctx.moveTo(ox, oy - 8); ctx.lineTo(ox - 6, oy + 5); ctx.lineTo(ox + 6, oy + 5); ctx.closePath(); ctx.fill();
+  ctx.textAlign = "left";
+}
+function shapePath(ctx, T, s, shape, x, y, yaw, size) {
+  ctx.beginPath();
+  if (shape === "cylinder") { const [a, b] = T(x, y); ctx.arc(a, b, size / 2 * s, 0, Math.PI * 2); return; }
+  const n = shape === "triangle" ? 3 : 4, R = shape === "triangle" ? size * 2 / 3 : size / Math.SQRT2;
+  for (let k = 0; k < n; k++) {
+    const th = yaw + (shape === "cube" ? Math.PI / 4 : 0) + k * 2 * Math.PI / n;
+    const [a, b] = T(x + R * Math.cos(th), y + R * Math.sin(th)); k ? ctx.lineTo(a, b) : ctx.moveTo(a, b);
+  }
+  ctx.closePath();
+}
+let cloudMode = "rgb";
+document.querySelectorAll("#cloudMode button").forEach(b => b.onclick = () => { cloudMode = b.dataset.m; document.querySelectorAll("#cloudMode button").forEach(x => x.classList.toggle("on", x === b)); drawTop(); });
+function errColor(mm) { return mm < 10 ? css("--good") : mm < 20 ? css("--warn") : css("--bad"); }
+function turbo(t) { t = Math.max(0, Math.min(1, t)); const r = 34.61 + t * (1172.33 - t * (10793.56 - t * (33300.12 - t * (38394.49 - t * 14825.05)))), g = 23.31 + t * (557.33 + t * (1225.33 - t * (3574.96 - t * (1073.77 + t * 707.56)))), b = 27.2 + t * (3211.1 - t * (15327.97 - t * (27814 - t * (22569.18 - t * 6838.66)))); return `rgb(${r | 0},${g | 0},${b | 0})`; }
+function drawTop() {
+  const cv = $("#topCanvas"); const [ctx, w, h] = fitCanvas(cv, 1.0);
+  ctx.fillStyle = css("--canvas"); ctx.fillRect(0, 0, w, h);
+  if (!G) return;
+  const T = tf(TV, w, h), s = Math.min(w, h) / TV.span;
+  drawScene(ctx, T, s);
+  if (!cur) return;
+  const xyz = cur.cloud.xyz, col = cur.cloud.rgb, ps = Math.max(1.2, s * 0.004);
+  if (cloudMode !== "off") for (let i = 0; i < xyz.length / 3; i++) {
+    const x = xyz[3 * i] / 1000, y = xyz[3 * i + 1] / 1000, z = xyz[3 * i + 2] / 1000;
+    const [a, b] = T(x, y); if (a < -2 || b < -2 || a > w + 2 || b > h + 2) continue;
+    ctx.fillStyle = cloudMode === "rgb" ? `rgb(${col[3 * i]},${col[3 * i + 1]},${col[3 * i + 2]})` : turbo((z - G.counter_z) / (2 * G.object_height));
+    ctx.globalAlpha = cloudMode === "rgb" ? 0.55 : 0.7; ctx.fillRect(a - ps / 2, b - ps / 2, ps, ps);
+  }
+  ctx.globalAlpha = 1;
+  for (const tfc of cur.top_faces) { ctx.fillStyle = "#ffffff"; for (const [x, y] of tfc.pts) { const [a, b] = T(x, y); ctx.fillRect(a - 0.8, b - 0.8, 1.6, 1.6); } }
+  const row = cur.row, gtCounter = row.gt.filter(g => g.where === "counter");
+  const matchBy = Object.fromEntries(row.matches.map(m => [m.name, m]));
+  const pairBy = Object.fromEntries(cur.pairs.map(p => [p.gt, p.det]));
+  const missBy = Object.fromEntries(row.missed.map(m => [m.name, m.why]));
+  for (const g of gtCounter) {
+    shapePath(ctx, T, s, g.shape, g.top[0], g.top[1], g.yaw, G.size);
+    ctx.lineWidth = 2; ctx.strokeStyle = OBJ[g.color]; ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = css("--ink"); ctx.stroke();
+    const [ga, gb] = T(g.top[0], g.top[1]);
+    ctx.strokeStyle = css("--ink"); ctx.beginPath(); ctx.arc(ga, gb, 3, 0, 7); ctx.stroke();
+    const det = pairBy[g.name];
+    if (det) {
+      const m = matchBy[g.name], [da, db] = T(det[0], det[1]), c = errColor(m.err_xy_mm);
+      ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ga, gb); ctx.lineTo(da, db); ctx.stroke();
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(da, db, 4, 0, 7); ctx.fill(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = "11px ui-monospace, monospace"; ctx.fillStyle = css("--ink"); ctx.fillText(`${m.err_xy_mm.toFixed(1)}mm`, ga + 8, gb + G.size * s * 0.75);
+    } else {
+      ctx.strokeStyle = css("--bad"); ctx.setLineDash([4, 3]); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ga, gb, G.size * s * 0.8, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = "bold 11px system-ui"; ctx.fillStyle = css("--bad"); ctx.fillText("MISS: " + (missBy[g.name] || "?"), ga + 10, gb - G.size * s * 0.8);
+    }
+  }
+  for (const f of cur.false_pos) {
+    if (f.top.some(v => v === null)) continue;
+    const [a, b] = T(f.top[0], f.top[1]); ctx.strokeStyle = "#d040d0"; ctx.lineWidth = 2; ctx.strokeRect(a - 6, b - 6, 12, 12);
+    ctx.fillStyle = "#d040d0"; ctx.font = "bold 11px system-ui"; ctx.fillText("FP " + f.color, a + 8, b);
+  }
+  if (hoverUV && depthData) {
+    const i = (hoverUV[1] * 640 + hoverUV[0]) * 4, dmm = depthData[i] * 256 + depthData[i + 1];
+    if (dmm >= P.depth_range_mm[0] && dmm <= P.depth_range_mm[1]) {
+      const p = pixToPelvis(hoverUV[0], hoverUV[1], dmm), [a, b] = T(p[0], p[1]);
+      ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a - 9, b); ctx.lineTo(a + 9, b); ctx.moveTo(a, b - 9); ctx.lineTo(a, b + 9); ctx.stroke();
+    }
+  }
+  // scale bar
+  ctx.fillStyle = css("--muted"); ctx.fillRect(12, h - 14, 0.1 * s, 2); ctx.font = "11px system-ui"; ctx.fillText("10 cm", 12, h - 18);
+}
+attachPanZoom($("#topCanvas"), TV, () => drawTop());
+
+function objTable() {
+  const row = cur.row, by = Object.fromEntries(row.matches.map(m => [m.name, m])), miss = Object.fromEntries(row.missed.map(m => [m.name, m.why]));
+  let h = `<table><tr><th>object</th><th>shape</th><th>result</th><th class="num">xy err mm</th><th class="num">dx</th><th class="num">dy</th><th class="num">dz</th><th>method</th><th class="num">blob px</th><th class="num">yaw err °</th></tr>`;
+  for (const g of row.gt.filter(g => g.where === "counter")) {
+    const m = by[g.name];
+    if (m) h += `<tr><td><span class="dot" style="background:${OBJ[g.color]}"></span>${g.color}</td><td>${g.shape}</td><td class="good">found</td><td class="num" style="color:${errColor(m.err_xy_mm)}">${m.err_xy_mm.toFixed(1)}</td><td class="num">${m.dx_mm.toFixed(1)}</td><td class="num">${m.dy_mm.toFixed(1)}</td><td class="num">${m.err_z_mm.toFixed(1)}</td><td>${m.method}</td><td class="num">${m.n_px}</td><td class="num">${m.yaw_err_deg ?? "–"}</td></tr>`;
+    else h += `<tr><td><span class="dot" style="background:${OBJ[g.color]}"></span>${g.color}</td><td>${g.shape}</td><td class="bad">missed · ${miss[g.name]}</td><td colspan="7" class="mut">${missWhy(miss[g.name])}</td></tr>`;
+  }
+  for (const f of cur.false_pos) h += `<tr><td><span class="dot" style="background:${OBJ[f.color]}"></span>${f.color}</td><td>–</td><td style="color:#d040d0">false positive</td><td colspan="7" class="mut">detection at (${f.top.map(v => v?.toFixed(3)).join(", ")}) with no same-colour object within 4 cm</td></tr>`;
+  h += "</table>";
+  const rej = cur.blobs.filter(b => b.status !== "detection");
+  if (rej.length) h += `<p class="explain">Rejected blobs: ${Object.entries(rej.reduce((a, b) => { const k = b.status.split(/[ :(]/)[0]; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([k, n]) => `${k} ×${n}`).join(" · ")}</p>`;
+  $("#objTable").innerHTML = h;
+}
+function missWhy(w) {
+  return { merged: "same blob as a touching same-colour neighbour: one detection lands between them", occluded: "something nearer the camera (a hand) covers its top centre", out_of_view: "its top centre projects outside the image", detector: "visible and separate, still not reported" }[w] || "";
+}
+
+// ---------------------------------------------------------------- whole-set metrics
+let allSeq = 0;
+async function runAll() {
+  const my = ++allSeq; $("#allNote").textContent = "running on all frames…";
+  try {
+    const d = await api(`/api/all?set=${encodeURIComponent(JSON.stringify(overrides()))}`);
+    if (my !== allSeq) return;
+    allCur = d; if (!allStock) allStock = d; updateChips(); allTable();
+    $("#allNote").textContent = `${d.overall.frames} frames in ${d.seconds} s · Δ vs stock config`;
+  } catch (e) { $("#allNote").textContent = "error: " + e.message; }
+}
+function delta(v, ref, better, fmt = x => x.toFixed(1), eps = 1e-9) {
+  if (ref == null || v == null || Math.abs(v - ref) < eps) return "";
+  const good = better === "up" ? v > ref : v < ref;
+  return `<span class="delta ${good ? "good" : "bad"}">${v > ref ? "+" : ""}${fmt(v - ref)}</span>`;
+}
+function allTable() {
+  const o = allCur.overall, so = allStock.overall;
+  const k = (label, v, ref, better, fmt, unit = "") => `<div class="kpi"><span>${label}</span><b>${fmt(v)}${unit}${delta(v, ref, better, fmt)}</b></div>`;
+  const pct = x => x == null ? "–" : (x * 100).toFixed(1), f1 = x => x == null ? "–" : x.toFixed(1), i0 = x => String(x);
+  $("#allKpis").innerHTML = k("recall", o.recall, so.recall, "up", pct, "%") + k("recall in view", o.recall_in_view, so.recall_in_view, "up", pct, "%") +
+    k("false positives", o.false_positives, so.false_positives, "down", i0) + k("median xy error", o.err_xy_mm?.median, so.err_xy_mm?.median, "down", f1, " mm") +
+    k("p90 xy error", o.err_xy_mm?.p90, so.err_xy_mm?.p90, "down", f1, " mm") + k("mean bias x / y", o.err_x_mm_mean_signed, null, null, f1, ` / ${o.err_y_mm_mean_signed?.toFixed(1)} mm`);
+  let h = `<table><tr><th>scenario</th><th class="num">objects</th><th class="num">recall</th><th class="num">in view</th><th class="num">frames all found</th><th class="num">FP</th><th class="num">xy median</th><th class="num">xy p90</th><th class="num">z median</th><th>misses</th></tr>`;
+  for (const [s, r] of Object.entries(allCur.by_scenario)) {
+    const st = allStock.by_scenario[s];
+    h += `<tr><td>${s}</td><td class="num">${r.objects}</td><td class="num">${pct(r.recall)}%${delta(r.recall, st.recall, "up", pct)}</td><td class="num">${pct(r.recall_in_view)}%</td><td class="num">${Math.round(r.frames_all_found * r.frames)}/${r.frames}</td><td class="num">${r.false_positives}${delta(r.false_positives, st.false_positives, "down", i0)}</td><td class="num">${f1(r.err_xy_mm?.median)}${delta(r.err_xy_mm?.median, st.err_xy_mm?.median, "down")}</td><td class="num">${f1(r.err_xy_mm?.p90)}${delta(r.err_xy_mm?.p90, st.err_xy_mm?.p90, "down")}</td><td class="num">${f1(r.err_z_mm?.median)}</td><td class="mut">${Object.entries(r.missed_why).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}</td></tr>`;
+  }
+  $("#allTable").innerHTML = h + "</table>";
+}
+
+// ---------------------------------------------------------------- episodes
+const EP = { data: null, i: 0, playing: false, speed: 4, last: 0 };
+const EV = makeView(-0.05, 0.75, -0.5, 0.5);
+async function loadEpisode(name) {
+  EP.playing = false; $("#playBtn").textContent = "▶ Play";
+  setStatus(`FK on ${name}…`, true);
+  try {
+    EP.data = await api(`/api/episode?name=${encodeURIComponent(name)}`); EP.i = 0;
+    $("#epSlider").max = EP.data.t.length - 1; $("#epSlider").value = 0;
+    const s = EP.data.summary;
+    $("#epSummary").innerHTML = `seed ${s.seed} · “${s.instruction}” · score <b>${s.score}/${s.max_score}</b> · ${s.end_reason} after ${s.sim_s.toFixed(1)} s sim · ${s.safety.clipped_steps} clipped steps · policy latency ${s.latency_ms_mean} ms`;
+    setStatus(`${name}: ${EP.data.t.length} samples`); drawEp();
+  } catch (e) { setStatus("error: " + e.message); }
+}
+$("#epSelect").onchange = e => loadEpisode(e.target.value);
+$("#epSlider").oninput = e => { EP.i = Number(e.target.value); drawEp(); };
+$("#playBtn").onclick = () => { EP.playing = !EP.playing; $("#playBtn").textContent = EP.playing ? "❚❚ Pause" : "▶ Play"; EP.last = performance.now(); if (EP.playing) requestAnimationFrame(tick); };
+document.querySelectorAll("#speedSeg button").forEach(b => b.onclick = () => { EP.speed = Number(b.dataset.s); document.querySelectorAll("#speedSeg button").forEach(x => x.classList.toggle("on", x === b)); });
+function tick(now) {
+  if (!EP.playing || !EP.data) return;
+  const t = EP.data.t, target = t[EP.i] + (now - EP.last) / 1000 * EP.speed; EP.last = now;
+  while (EP.i < t.length - 1 && t[EP.i] < target) EP.i++;
+  if (EP.i >= t.length - 1) { EP.playing = false; $("#playBtn").textContent = "▶ Play"; }
+  $("#epSlider").value = EP.i; drawEp(); if (EP.playing) requestAnimationFrame(tick);
+}
+const SIDES = [["left", "--left"], ["right", "--right"]];
+function drawEp() {
+  if (!EP.data || !$("#ep").classList.contains("on")) return;
+  const D = EP.data, i = EP.i;
+  $("#epTime").textContent = `t ${D.t[i].toFixed(2)} s / ${D.t[D.t.length - 1].toFixed(1)}`;
+  // top-down
+  { const cv = $("#epTop"); const [ctx, w, h] = fitCanvas(cv, 0.93); ctx.fillStyle = css("--canvas"); ctx.fillRect(0, 0, w, h);
+    const T = tf(EV, w, h), s = Math.min(w, h) / EV.span; drawScene(ctx, T, s);
+    for (const o of D.objects_start) { shapePath(ctx, T, s, o.shape, o.pos[0], o.pos[1], o.yaw, G.size); ctx.setLineDash([4, 3]); ctx.strokeStyle = OBJ[o.color]; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
+    for (const o of D.objects_end) {   // faint until the last sample
+      const [a, b] = T(o.pos[0], o.pos[1]); ctx.globalAlpha = i === D.t.length - 1 ? 1 : 0.35;
+      shapePath(ctx, T, s, o.shape, o.pos[0], o.pos[1], 0, G.size); ctx.fillStyle = OBJ[o.color]; ctx.fill();
+      ctx.fillStyle = o.outcome === "correct" ? css("--good") : css("--bad"); ctx.font = "bold 12px system-ui"; ctx.fillText(o.outcome === "correct" ? "✓" : "✗ " + o.outcome, a + 10, b + 4); ctx.globalAlpha = 1;
+    }
+    for (const [side, cvar] of SIDES) {
+      const ch = D.chain[side], c = css(cvar);
+      ctx.strokeStyle = c; ctx.globalAlpha = 0.18; ctx.lineWidth = 1; ctx.beginPath(); ch.forEach((q, k) => { const [a, b] = T(q[5][0], q[5][1]); k ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.beginPath(); const j0 = Math.max(0, i - 90); for (let k = j0; k <= i; k++) { const [a, b] = T(ch[k][5][0], ch[k][5][1]); k > j0 ? ctx.lineTo(a, b) : ctx.moveTo(a, b); } ctx.stroke();
+      drawArm(ctx, (p) => T(p[0], p[1]), ch[i], D.tips[side][i], c, D.closure[side][i]);
+    }
+    ctx.fillStyle = css("--muted"); ctx.fillRect(12, h - 14, 0.1 * s, 2); ctx.font = "11px system-ui"; ctx.fillText("10 cm", 12, h - 18);
+  }
+  // side view: x right, z up
+  { const cv = $("#epSide"); const [ctx, w, h] = fitCanvas(cv, 0.6); ctx.fillStyle = css("--canvas"); ctx.fillRect(0, 0, w, h);
+    const x0 = -0.08, x1 = 0.72, z0 = -0.05, s = w / (x1 - x0); const T = p => [(p[0] - x0) * s, h - (p[2] - z0) * s - 10];
+    const [, cy] = T([0, 0, G.counter_z]); ctx.strokeStyle = css("--muted"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(T([0.14, 0, 0])[0], cy); ctx.lineTo(w, cy); ctx.stroke();
+    const bx = Object.values(G.bins)[0].map(p => p[0]); const [ba] = T([Math.min(...bx), 0, 0]), [bb, bt] = T([Math.max(...bx), 0, G.counter_z + G.wall_height]);
+    ctx.strokeStyle = "#e6782a"; ctx.lineWidth = 1.5; ctx.strokeRect(ba, bt, bb - ba, cy - bt);
+    ctx.fillStyle = css("--muted"); ctx.font = "11px system-ui"; ctx.fillText("bins", ba + 4, bt - 4); ctx.fillText("counter", T([0.16, 0, 0])[0], cy + 14);
+    const [px, py] = T([0, 0, 0]); ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill(); ctx.fillText("pelvis", px + 6, py + 4);
+    for (const [side, cvar] of SIDES) drawArm(ctx, T, D.chain[side][i], D.tips[side][i], css(cvar), D.closure[side][i]);
+  }
+  drawTimeline();
+}
+function drawArm(ctx, T, ch, tips, c, closure) {
+  ctx.strokeStyle = c; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.beginPath();
+  for (let k = 0; k < 5; k++) { const [a, b] = T(ch[k]); k ? ctx.lineTo(a, b) : ctx.moveTo(a, b); } ctx.stroke();
+  ctx.lineWidth = 1.5; const [pa, pb] = T(ch[4]);
+  for (const tp of tips) { const [a, b] = T(tp); ctx.beginPath(); ctx.moveTo(pa, pb); ctx.lineTo(a, b); ctx.stroke(); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(a, b, 2.5, 0, 7); ctx.fill(); }
+  const [ga, gb] = T(ch[5]); ctx.fillStyle = closure > 0.5 ? c : css("--canvas"); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ga, gb, 5, 0, 7); ctx.fill(); ctx.stroke();
+  for (let k = 0; k < 4; k++) { const [a, b] = T(ch[k]); ctx.fillStyle = css("--panel"); ctx.beginPath(); ctx.arc(a, b, 3, 0, 7); ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.stroke(); }
+}
+function drawTimeline() {
+  const D = EP.data, cv = $("#epTL"); const [ctx, w, h] = fitCanvas(cv, 0.6); ctx.fillStyle = css("--canvas"); ctx.fillRect(0, 0, w, h);
+  const n = D.t.length, L = 70, R = w - 8, X = k => L + (R - L) * k / (n - 1);
+  const lanes = [["grip (0 open, 1 closed)", D.closure, Math.min(-0.1, ...D.closure.left, ...D.closure.right), 1.05],
+    ["grasp z (m)", { left: D.chain.left.map(q => q[5][2]), right: D.chain.right.map(q => q[5][2]) }, G.counter_z, null],
+    ["track err (rad)", D.track_err, 0, null]];
+  const lh = (h - 30) / lanes.length;
+  ctx.font = "11px system-ui";
+  lanes.forEach(([label, data, lo, hi], li) => {
+    const top = 6 + li * lh, bot = top + lh - 10;
+    if (hi == null) hi = Math.max(...data.left, ...data.right);
+    if (li === 1) lo = Math.min(lo, ...data.left, ...data.right);
+    ctx.fillStyle = css("--muted"); ctx.fillText(label, 4, top + 10); ctx.fillText(hi.toFixed(2), 4, top + 24);
+    ctx.strokeStyle = css("--line"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, bot); ctx.lineTo(R, bot); ctx.stroke();
+    if (li === 1) { const y = bot - (G.counter_z - lo) / (hi - lo) * (bot - top); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(R, y); ctx.stroke(); ctx.setLineDash([]); ctx.fillText("counter", 4, y + 4); }
+    for (const [side, cvar] of SIDES) {
+      ctx.strokeStyle = css(cvar); ctx.lineWidth = 1.3; ctx.beginPath();
+      data[side].forEach((v, k) => { const y = bot - (v - lo) / (hi - lo || 1) * (bot - top); k ? ctx.lineTo(X(k), y) : ctx.moveTo(X(k), y); }); ctx.stroke();
+    }
+  });
+  ctx.fillStyle = css("--bad"); D.clipped.forEach((c, k) => { if (c) ctx.fillRect(X(k), h - 20, 2, 8); });
+  ctx.fillStyle = css("--muted"); ctx.fillText(`safety clips: ${D.clipped.reduce((a, b) => a + b, 0)}`, 4, h - 12);
+  for (let s = 0; s <= D.t[n - 1]; s += 10) { const k = D.t.findIndex(t => t >= s); if (k >= 0) { ctx.fillText(s + "s", X(k) - 6, h - 2); } }
+  ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(EP.i), 0); ctx.lineTo(X(EP.i), h - 22); ctx.stroke();
+}
+function seekTL(ev) { if (!EP.data) return; const r = $("#epTL").getBoundingClientRect(), L = 70, R = r.width - 8; EP.i = Math.max(0, Math.min(EP.data.t.length - 1, Math.round((ev.clientX - r.left - L) / (R - L) * (EP.data.t.length - 1)))); $("#epSlider").value = EP.i; drawEp(); }
+$("#epTL").addEventListener("mousedown", ev => { seekTL(ev); const mv = e => seekTL(e); window.addEventListener("mousemove", mv); window.addEventListener("mouseup", () => window.removeEventListener("mousemove", mv), { once: true }); });
+attachPanZoom($("#epTop"), EV, () => drawEp());
+
+// ---------------------------------------------------------------- boot
+window.addEventListener("resize", () => { drawImage(); drawTop(); drawEp(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawImage(); drawTop(); drawEp(); });
+(async () => {
+  try {
+    const ix = await api("/api/index");
+    G = ix.geometry; STOCK = ix.perception; P = structuredClone(STOCK); window.FRAMES = ix.frames;
+    buildParams(); buildStagebar(); buildFrameList();
+    $("#epSelect").innerHTML = ix.episodes.map(e => `<option>${e}</option>`).join("") || "<option>no episodes found</option>";
+    if (ix.frames.length) { await loadFrame(ix.frames.find(f => f.startsWith("crowded")) || ix.frames[0]); runAll(); }
+    else setStatus("no frames: run perception_eval with --raw first");
+  } catch (e) { setStatus("error: " + e.message); }
+})();
+</script>
+</body>
+</html>
