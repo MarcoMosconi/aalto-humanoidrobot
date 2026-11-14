@@ -5,18 +5,42 @@ Pinocchio IK → carry to the bin given by the mapping (rung 1: red → left, ye
 (`done`). Plans are pre-checked against the safety filter (0 clips). Cross-body objects are put down where the other
 arm can finish. Rung 1 only: ignores shape and the instruction text. Meant as a floor and a code reference.
 
+Perception splits a blob whose top face is too big for one object (touching same-colour objects) and joins pieces of
+one object cut apart by a hand (`results/perception_eval/README.md`). **Clear look:** the head camera is fixed (no
+neck, waist locked), but the hands can be in its view (sim home = `ARM_HOME`). If the object about to be picked touches
+a hand in the image, or nothing is left while a hand hides part of the object band, the arms move to
+`policy.look_arm_q` (out of view), the policy looks again and plans from there; at most once per pick.
+`policy.look_arm_q: null` turns it off. Objects outside the camera view are not searched for (the episode band is fully
+in view).
+
 | File | What |
 |---|---|
 | `perception.py` | HSV masks + head depth → detections in the pelvis frame (`interface/calibration.yaml`) |
 | `kinematics.py` | Pinocchio FK/IK on the G1 URDF (`third_party/xr_teleoperate/.../g1_body29_hand14.urdf`) |
 | `planner.py` | Cartesian waypoints → 30 Hz joint trajectories, safety pre-check |
-| `policy.py` | `ClassicalPolicy`: state machine; plans in a thread and returns holds meanwhile |
+| `policy.py` | `ClassicalPolicy`: state machine (home → look → plan → execute; clear look when a hand hides objects); plans in a thread and returns holds meanwhile |
 | `policy_server.py` | The same policy behind the submission protocol (port 8000) = **reference submission** |
 | `config.yaml` | Everything tunable (HSV ranges, grasp, home pose, speeds, hand postures); `profiles.sim` = sim-tuned overrides |
 | `run.py`, `sim_eval.py`, `mock_world.py` | In-process runs: mock world / real robot, Isaac sim scoring, rendered mock |
 | `viz_demo.py` + `viz_demo.html` | Browser viewer: perception stages live on saved RGB-D frames (editable params, metrics vs stock), FK replay of evaluator episodes |
 
-## Numbers (2026-11-11, nominal sim = DR off, rung 1)
+## Numbers (nominal sim = DR off, rung 1)
+
+**2026-11-14, clear look on vs off** (same code incl. blob split/join, same 8 layouts, `sim_eval` in-process, seeds 0–7,
+one Isaac instance on twinflow):
+
+| | clear look off (`policy.look_arm_q: null`) | clear look on (default) |
+|---|---|---|
+| objects sorted | 25/38 (66 %) | **29/38 (76 %)** |
+| episodes all-correct | 0/8 | 1/8 |
+| safety clips / time-limit hits | 0 / 0 | 0 / 0 |
+| episode time, total | 615 s | 665 s (+6 s per episode; seed 5: 119.5 s vs 60.5 s) |
+| clear looks | – | 20 (12 before a pick next to a hand, 8 before `done`) |
+
+Better on 4 seeds (+1, +1, +1, +2), equal on 3, worse on 1 (−1). +4 objects is about the +-10 % run-to-run spread,
+so promising, not proven. Misses are the same kind in both: objects left on the counter, mostly triangles (grasp).
+
+**2026-11-11** (before split/join/clear look):
 
 | Where | Result |
 |---|---|

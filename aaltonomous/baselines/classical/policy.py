@@ -7,7 +7,14 @@
         obs, info = env.step(action)
 
 Behaviour: go home -> settle -> look (head RGB-D) -> plan one object -> execute -> back home -> look again ...
-until nothing sortable is left (then `done`). While it is planning (background thread when `threaded=True`) or
+until nothing sortable is left (then `done`).
+
+Clear look (hands out of view): the head camera is fixed, but the hands can be in its view (sim home = ARM_HOME). When
+the object about to be picked touches a hand in the image (Perception.occlusion: its blob is next to something higher
+than any object, inside the object band), or nothing is left to sort while a hand hides part of the band, the arms first
+move to `policy.look_arm_q` (out of the head view), settle, and look again; the plan is made from there. At most one
+clear look per pick (reset when a plan starts), so it cannot loop. Objects out of the camera's view are not searched for:
+the episode band is fully in view (only a knocked-away object can leave it), and the head cannot move. While it is planning (background thread when `threaded=True`) or
 waiting for an operator confirm, act() returns 1-tick HOLD actions (the last target), so the env's watchdog
 never fires. Targets are absolute, planned at <= motion.arm_max_vel and pre-checked against a SafetyFilter.
 
@@ -57,6 +64,8 @@ class ClassicalPolicy:
         self.safety = safety or SafetyConfig(dt=1.0 / HZ)
         self.perception = Perception(self.cfg, self.scene, self.cal)
         self.planner = Planner(self.cfg, self.scene, self.post, self.home, self.kin, self.safety, self.spec)
+        lq = self.cfg["policy"].get("look_arm_q")
+        self.look_q = np.asarray(lq, float) if lq is not None else None   # None = clear look off
         self.require_confirm = require_confirm
         self.threaded = threaded
         if threaded:  # pure-Python planning holds the GIL: hand it back to act() sooner (default 5 ms)
@@ -86,6 +95,8 @@ class ClassicalPolicy:
         self._job = None
         self._decision = None
         self.last_detections = []
+        self._clear_view = False    # this look is from look_arm_q (hands out of view): no further clear look
+        self.n_clear_looks = 0
 
     def confirm(self):
         self._decision = "go"
@@ -104,6 +115,7 @@ class ClassicalPolicy:
             self.arm_cmd = np.clip(np.asarray(obs["arm_q"], float), sp.arm_lower, sp.arm_upper)
             self.hand_cmd = np.clip(np.asarray(obs["hand_q"], float), sp.hand_lower, sp.hand_upper)
         t = float(obs.get("t", 0.0))
+        self._last_obs = obs
         if self.queue_a is not None and len(self.queue_a):
             return self._pop()
         if self.state == "init":
@@ -163,6 +175,11 @@ class ClassicalPolicy:
                 self.state = "done"
                 self._note(t, "operator stop")
             return self._hold(done=self.state == "done")
+        if self.state == "clear":  # move the arms out of the head view, settle, look again
+            a, h = self.planner.go_to(self.arm_cmd, self.hand_cmd, self.look_q, self.hand_cmd)
+            self._enqueue(a, h)
+            self.state = "settle"
+            return self._pop() if len(a) else self.act(obs)
         if self.state == "executing":  # queue drained -> back home: look again after settling
             self.state = "settle"
             return self.act(obs)
@@ -179,6 +196,8 @@ class ClassicalPolicy:
     def _look(self, obs):
         dets = self.perception.detect(obs["head_rgb"], obs["head_depth"])
         self.last_detections = dets
+        can_clear = self.look_q is not None and not self._clear_view
+        hidden, near = self.perception.occlusion(obs["head_depth"], dets) if can_clear else (0, [])
         cands = []
         for d in dets:
             xy = d.top[:2]
@@ -197,6 +216,8 @@ class ClassicalPolicy:
                 return -d.n_px
         cands.sort(key=key)
         for d in cands:
+            if any(d is n for n in near):  # partly behind a hand: centre may be off -> look with the hands away
+                return ("clear", f"{d.color} at ({d.top[0]:+.3f},{d.top[1]:+.3f}) touches a hand in the image", len(dets))
             others = [o.top[:2] for o in dets if o is not d]
             p = self.planner.plan(d, self.arm_cmd, self.hand_cmd, obstacles=others)
             self.plans.append(p)
@@ -204,6 +225,8 @@ class ClassicalPolicy:
                 return ("plan", p, len(dets))
             self.failed.append(d.top[:2])
             self.log(f"[classical] skip {d}: {p.reason}")
+        if hidden >= int(self.cfg["policy"].get("clear_look_min_hidden_px", 300)):
+            return ("clear", f"nothing to sort, but a hand hides {hidden} px of the object band", len(dets))
         return ("none", None, len(dets))
 
     def _after_look(self, res, t):
@@ -212,6 +235,12 @@ class ClassicalPolicy:
             self._note(t, f"look/plan error {res[1]}: stopping")
             self.state = "done"
             return self._hold(done=True)
+        if kind == "clear":
+            self._clear_view = True
+            self.n_clear_looks += 1
+            self._note(t, f"clear look: {res[1]}")
+            self.state = "clear"
+            return self.act(self._last_obs)
         if kind == "none":
             self._note(t, f"nothing left to sort ({res[2]} detections)")
             self.state = "done"
@@ -231,6 +260,7 @@ class ClassicalPolicy:
     def _start(self, plan, t):
         xy = plan.waypoints["grasp"][:2]
         self.attempts.append((xy, 1))
+        self._clear_view = False   # the next look is from home again
         self._enqueue(plan.arm, plan.hand)
         self.state = "executing"
         self._note(t, f"execute {plan.summary()}")

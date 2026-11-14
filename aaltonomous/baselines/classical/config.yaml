@@ -43,6 +43,10 @@ perception:
   bin_pixel_margin: 0.004     # pixels whose 3D point is inside a bin footprint (+ margin) are dropped before grouping
   object_size: null           # null = scene.yaml objects.size (grasp width)
   xy_offset: [0.0, 0.0]   # pelvis-frame xy added to every detection (head extrinsics correction). TUNE on the robot
+  occlusion:                  # Perception.occlusion: is a hand hiding part of the object band?
+    min_height: 1.3           # pixels whose 3D point is this many object heights above the counter = occluder
+    band_margin: 0.02         # m around the layout region (+ half an object) that counts as object band
+    near_px: 3                # a detection whose blob comes this close to an occluder may be partly hidden
   object_height: null         # null = scene.yaml size * height_ratio
 
 grasp:
@@ -123,6 +127,12 @@ policy:
   max_attempts: 2             # same object re-detected after this many tries -> skip it
   same_object_radius: 0.03
   order: nearest_bin          # nearest_bin | largest
+  # Clear look: if the object about to be picked touches a hand in the head image, or nothing is left while a hand
+  # hides >= clear_look_min_hidden_px of the object band, move the arms here (out of the head view), look again and
+  # plan from here. = the robot home_arm_q above (hands >= 40 px outside the head image). null = off.
+  look_arm_q: [0.2, 0.7, 0.4, -0.2, 0.0, -0.5, 0.0,
+               0.2, -0.7, -0.4, -0.2, 0.0, -0.5, 0.0]
+  clear_look_min_hidden_px: 300
 
 # Overrides per profile (dotted keys). `sim` = Aalto Isaac sim, ported from the oracle's ORACLE_OVERRIDES
 # (sim/oracle.py) minus anything privileged; SIM-TUNED, not validated on the robot.

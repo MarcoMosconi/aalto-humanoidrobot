@@ -223,6 +223,61 @@ class TestEpisode(unittest.TestCase):
             total_correct += out.count("correct")
         self.assertGreaterEqual(total_correct, 3)
 
+    def test_clear_look_pose_move_is_safe_and_out_of_view(self):
+        """sim home (hands in view) -> policy.look_arm_q: no safety clips, hands above counter and bin rims all the
+        way, and at the look pose no hand point projects into the head image."""
+        pol = ClassicalPolicy(log=None)
+        pl, kin = pol.planner, pol.kin
+        a, h = pl.go_to(pol.home, pol.post["open"], pol.look_q, pol.post["open"])
+        self.assertEqual(pl.dry_run_safety(pol.home, pol.post["open"], a, h), 0)
+        for k in range(0, len(a), 3):
+            for side in ("left", "right"):
+                self.assertGreater(pl.clearance(side, a[k], h[k]), 0.02, f"tick {k} {side} near the counter")
+                self.assertGreater(pl.bin_clearance(side, a[k], h[k]), 0.0, f"tick {k} {side} in a bin")
+        W, H = 640, 480
+        for side in ("left", "right"):
+            uvz = CAL.project(pol.perception.cam, kin.hand_points(side, a[-1], h[-1]))
+            inside = (uvz[:, 2] > 0) & (uvz[:, 0] >= 0) & (uvz[:, 0] < W) & (uvz[:, 1] >= 0) & (uvz[:, 1] < H)
+            self.assertFalse(inside.any(), f"{side} hand still in the head image at look_arm_q")
+
+    def test_hand_over_an_object_triggers_a_clear_look(self):
+        """Mock 'hand': a grey patch, higher than any object, over the left part of one object, drawn only while the
+        arms are near home. The policy must look again with the arms at look_arm_q and still sort everything."""
+        from .mock_world import RenderMockBackend
+
+        class HandInView(RenderMockBackend):
+            box = None
+
+            def images(self):
+                out = super().images()
+                if self.box is not None and np.abs(self.arm_q - HOME).max() < 0.1:
+                    u0, u1, v0, v1 = self.box
+                    out["head_rgb"][v0:v1, u0:u1] = 40
+                    out["head_depth"][v0:v1, u0:u1] = (out["head_depth"][v0:v1, u0:u1] * 0.85).astype(np.uint16)
+                return out
+
+        env = make_mock_env(seed=1)
+        env.backend.__class__ = HandInView
+        pol = ClassicalPolicy(log=None, safety=env.filter.cfg)
+        HOME = pol.home
+        obs = env.reset()
+        ob = env.backend.objects[0]
+        uv = CAL.project(pol.perception.cam, ob["pos"] + [0, 0, ob["height"] / 2])
+        env.backend.box = (int(uv[0]) - 40, int(uv[0]) - 8, int(uv[1]) - 40, int(uv[1]) + 40)  # covers its left side
+        env.backend._cache = None
+        pol.reset({"instruction": obs["instruction"]})
+        while True:
+            obs, info = env.step(pol.act(obs))
+            if info["episode_over"]:
+                break
+        self.assertGreaterEqual(pol.n_clear_looks, 1, pol.events)
+        self.assertTrue(any("touches a hand" in m for _, m in pol.events), pol.events)
+        self.assertEqual(info["safety_summary"]["clipped_steps"], 0, info["safety_summary"])
+        out = env.backend.outcomes(pol.mapping)
+        self.assertNotIn("wrong", out)
+        self.assertNotIn("off", out)
+        self.assertEqual(out.count("correct"), len(out), (out, pol.events))
+
     def test_confirm_gate_holds_until_confirmed(self):
         env = make_mock_env(seed=0)
         pol = ClassicalPolicy(log=None, require_confirm=True)

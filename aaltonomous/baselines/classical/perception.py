@@ -33,6 +33,7 @@ class Detection:
                                # object cut apart by a hand) | "plane"
     yaw: float | None = None   # in-plane orientation of the top face (rad), info only
     uv: tuple = field(default=(0.0, 0.0))
+    blob: object = field(default=None, repr=False, compare=False)  # uint8 image mask of the blob(s) it came from
 
     def __repr__(self):
         x, y, z = self.top
@@ -133,6 +134,12 @@ class Perception:
         for k, b in enumerate(blobs):
             if k not in deep:
                 out.append(([k], [self._from_plane(color, b["cent"], b["area"], len(b["u"]))]))
+        for g, found in out:
+            m = blobs[g[0]]["blob"]
+            for k in g[1:]:
+                m = m | blobs[k]["blob"]
+            for det in found:
+                det.blob = m
         return out
 
     def _join(self, blobs, idx):
@@ -189,6 +196,58 @@ class Perception:
                 changed = True
                 break
         return groups
+
+    def occlusion(self, depth, dets=()):
+        """Is something (a hand, an arm) hiding part of the object band?  -> (hidden_px, near).
+        hidden_px: pixels of the object band's image region (scene.yaml layout region + one object + occlusion.
+        band_margin, at object-top height) whose 3D point is higher than any object top (occlusion.min_height, in
+        object heights above the counter): an object behind them cannot be seen. near: the detections whose blob
+        comes within occlusion.near_px of those pixels, i.e. that may be partly hidden (cut, biased centre)."""
+        import cv2
+        oc = self.cfg.get("occlusion") or {}
+        if depth is None:
+            return 0, []
+        sc = self.scene
+        dlo, dhi = self.cfg["depth_range_mm"]
+        d = depth.astype(float)
+        valid = (d >= dlo) & (d <= dhi)
+        if valid.mean() < self.cfg["min_valid_frac"]:
+            return 0, []
+        band = self._band_mask(depth.shape, float(oc.get("band_margin", 0.02)))
+        vv, uu = np.nonzero(valid & (band > 0))
+        if not len(vv):
+            return 0, []
+        P = self.cal.pixel_to_pelvis(self.cam, uu, vv, d[vv, uu])
+        high = (P[:, 2] - sc.counter_z) / self.height > float(oc.get("min_height", 1.3))
+        occ = np.zeros(depth.shape, np.uint8)
+        occ[vv[high], uu[high]] = 1
+        k = int(self.cfg["open_px"])
+        if k > 0:  # depth speckle is not a hand
+            occ = cv2.morphologyEx(occ, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
+        hidden = int(occ.sum())
+        if not hidden or not len(dets):
+            return hidden, []
+        n = 2 * int(oc.get("near_px", 3)) + 1
+        occ_grown = cv2.dilate(occ, np.ones((n, n), np.uint8))
+        near = [det for det in dets if det.blob is not None and np.any(occ_grown & det.blob)]
+        return hidden, near
+
+    def _band_mask(self, shape, margin):
+        """uint8 mask (1 inside) of the image region where episode objects can lie: scene.yaml layout region grown
+        by half an object + margin, between counter and object-top height."""
+        import cv2
+        sc = self.scene
+        L = sc.cfg["layout"]
+        g = self.size / 2 + margin
+        x0, x1 = L["region_x"][0] - g, L["region_x"][1] + g
+        y0, y1 = L["region_y"][0] - g, L["region_y"][1] + g
+        pts = np.array([[x, y, z] for x in (x0, x1) for y in (y0, y1) for z in (0.0, self.height)])
+        uvz = self.cal.project(self.cam, sc.mat_to_pelvis(pts))
+        m = np.zeros(shape, np.uint8)
+        if np.any(uvz[:, 2] <= 0):
+            return m
+        cv2.fillConvexPoly(m, cv2.convexHull(np.round(uvz[:, :2]).astype(np.int32)), 1)
+        return m
 
     def _keep_mask(self, depth):
         """uint8 mask of pixels that may belong to an object: no valid depth (unknown), or a 3D point at object
