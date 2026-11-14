@@ -7,85 +7,85 @@
  "overall": {
   "frames": 48,
   "objects": 211,
-  "recall": 0.825,
-  "frames_all_found": 0.417,
+  "recall": 0.867,
+  "frames_all_found": 0.562,
   "false_positives": 9,
-  "frames_clean": 0.333,
+  "frames_clean": 0.479,
   "err_xy_mm": {
-   "n": 174,
-   "mean": 8.47,
-   "median": 6.27,
-   "p90": 17.23,
-   "max": 35.95
+   "n": 183,
+   "mean": 7.51,
+   "median": 6.09,
+   "p90": 14.65,
+   "max": 28.72
   },
   "err_z_mm": {
-   "n": 174,
-   "mean": 5.46,
-   "median": 5.91,
+   "n": 183,
+   "mean": 5.49,
+   "median": 5.92,
    "p90": 6.47,
    "max": 6.61
   },
-  "err_x_mm_mean_signed": 3.81,
-  "err_y_mm_mean_signed": 4.28,
+  "err_x_mm_mean_signed": 3.4,
+  "err_y_mm_mean_signed": 4.37,
   "method": {
-   "depth": 174,
+   "depth": 166,
+   "split": 17,
    "plane": 0
   },
   "yaw_err_deg_cube": {
-   "n": 52,
-   "mean": 4.97,
+   "n": 54,
+   "mean": 2.6,
    "median": 0.2,
-   "p90": 24.12,
+   "p90": 1.55,
    "max": 42.3
   },
   "missed_why": {
-   "merged": 9,
    "occluded": 8,
    "out_of_view": 20
   },
   "rejected": {
-   "in_bin": 277,
+   "in_bin": 285,
    "height": 87
   },
   "missed_by_shape": {
-   "cylinder": 13,
-   "triangle": 12,
-   "cube": 12
+   "triangle": 9,
+   "cylinder": 9,
+   "cube": 10
   },
   "objects_by_shape": {
    "cube": 64,
    "cylinder": 75,
    "triangle": 72
   },
-  "recall_in_view": 0.911,
+  "recall_in_view": 0.958,
   "err_xy_mm_bias_removed": {
-   "n": 174,
-   "mean": 5.48,
-   "median": 2.04,
-   "p90": 16.71,
-   "max": 31.29
+   "n": 183,
+   "mean": 4.18,
+   "median": 1.67,
+   "p90": 11.27,
+   "max": 29.18
   },
   "xy_by_shape": {
    "cube": {
-    "n": 52,
-    "mean": 9.77,
-    "median": 7.21,
-    "p90": 21.41,
+    "n": 54,
+    "mean": 8.2,
+    "median": 6.41,
+    "p90": 14.95,
     "max": 28.72
    },
    "cylinder": {
-    "n": 62,
-    "mean": 7.93,
-    "median": 6.06,
-    "p90": 17.47,
-    "max": 28.66
+    "n": 66,
+    "mean": 7.15,
+    "median": 5.96,
+    "p90": 13.43,
+    "max": 24.02
    },
    "triangle": {
-    "n": 60,
-    "mean": 7.92,
-    "median": 6.18,
-    "p90": 14.8,
-    "max": 35.95
+    "n": 63,
+    "mean": 7.3,
+    "median": 6.0,
+    "p90": 13.42,
+    "max": 21.25
    }
   }
  },
@@ -115,6 +115,7 @@
    "err_y_mm_mean_signed": 4.56,
    "method": {
     "depth": 55,
+    "split": 0,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -170,84 +171,82 @@
   "crowded": {
    "frames": 12,
    "objects": 55,
-   "recall": 0.818,
-   "frames_all_found": 0.333,
+   "recall": 0.982,
+   "frames_all_found": 0.917,
    "false_positives": 2,
-   "frames_clean": 0.25,
+   "frames_clean": 0.833,
    "err_xy_mm": {
-    "n": 45,
-    "mean": 10.03,
-    "median": 6.52,
-    "p90": 23.77,
-    "max": 35.95
+    "n": 54,
+    "mean": 6.52,
+    "median": 5.89,
+    "p90": 10.97,
+    "max": 19.66
    },
    "err_z_mm": {
-    "n": 45,
-    "mean": 5.9,
-    "median": 5.91,
-    "p90": 6.35,
+    "n": 54,
+    "mean": 5.93,
+    "median": 5.92,
+    "p90": 6.39,
     "max": 6.61
    },
-   "err_x_mm_mean_signed": 4.29,
-   "err_y_mm_mean_signed": 4.79,
+   "err_x_mm_mean_signed": 2.8,
+   "err_y_mm_mean_signed": 5.02,
    "method": {
-    "depth": 45,
+    "depth": 37,
+    "split": 17,
     "plane": 0
    },
    "yaw_err_deg_cube": {
-    "n": 15,
-    "mean": 8.13,
-    "median": 0.4,
-    "p90": 30.98,
-    "max": 38.2
+    "n": 17,
+    "mean": 0.24,
+    "median": 0.2,
+    "p90": 0.44,
+    "max": 0.5
    },
    "missed_why": {
-    "merged": 9,
     "occluded": 1
    },
    "rejected": {
-    "in_bin": 71,
+    "in_bin": 73,
     "height": 23
    },
    "missed_by_shape": {
-    "cylinder": 4,
-    "triangle": 4,
-    "cube": 2
+    "triangle": 1
    },
    "objects_by_shape": {
     "cube": 17,
     "cylinder": 18,
     "triangle": 20
    },
-   "recall_in_view": 0.818,
+   "recall_in_view": 0.982,
    "err_xy_mm_bias_removed": {
-    "n": 45,
-    "mean": 7.23,
-    "median": 1.95,
-    "p90": 20.42,
-    "max": 30.74
+    "n": 54,
+    "mean": 2.59,
+    "median": 1.01,
+    "p90": 7.76,
+    "max": 17.79
    },
    "xy_by_shape": {
     "cube": {
-     "n": 15,
-     "mean": 10.62,
-     "median": 6.6,
-     "p90": 23.77,
-     "max": 24.45
+     "n": 17,
+     "mean": 5.56,
+     "median": 5.46,
+     "p90": 7.25,
+     "max": 7.78
     },
     "cylinder": {
-     "n": 14,
-     "mean": 9.82,
-     "median": 6.53,
-     "p90": 22.5,
-     "max": 28.66
+     "n": 18,
+     "mean": 6.55,
+     "median": 6.18,
+     "p90": 8.43,
+     "max": 17.66
     },
     "triangle": {
-     "n": 16,
-     "mean": 9.67,
-     "median": 6.07,
-     "p90": 17.17,
-     "max": 35.95
+     "n": 19,
+     "mean": 7.34,
+     "median": 5.81,
+     "p90": 13.84,
+     "max": 19.66
     }
    }
   },
@@ -276,6 +275,7 @@
    "err_y_mm_mean_signed": 5.19,
    "method": {
     "depth": 43,
+    "split": 0,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -290,7 +290,7 @@
     "out_of_view": 4
    },
    "rejected": {
-    "in_bin": 61,
+    "in_bin": 65,
     "height": 23
    },
    "missed_by_shape": {
@@ -360,6 +360,7 @@
    "err_y_mm_mean_signed": 1.77,
    "method": {
     "depth": 31,
+    "split": 0,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -374,7 +375,7 @@
     "occluded": 2
    },
    "rejected": {
-    "in_bin": 70,
+    "in_bin": 72,
     "height": 18
    },
    "missed_by_shape": {

@@ -160,18 +160,21 @@ class Engine:
                 dd = depth[v, u].astype(float)
                 ok = (dd >= dlo) & (dd <= dhi)
                 top_uv = None
-                det = None
+                found = []
                 if ok.sum() >= c["min_valid_depth_px"]:
-                    det = per._from_depth(color, u[ok], v[ok], dd[ok], area)
+                    found = per._from_depth(color, u[ok], v[ok], dd[ok], area)
                     P = self.cal.pixel_to_pelvis(per.cam, u[ok], v[ok], dd[ok])
                     z_top = np.percentile(P[:, 2], c["top_percentile"])
                     sel = P[:, 2] >= z_top - c["top_band"]
                     top_uv = (u[ok][sel], v[ok][sel], P[sel])
-                if det is None:
-                    det = per._from_plane(color, cent[i], area, int(ok.sum()))
-                rej = per._reject(det)
+                if not found:
+                    found = [per._from_plane(color, cent[i], area, int(ok.sum()))]
+                rejs = [per._reject(dt) for dt in found]
+                # a split blob is a "detection" if any of its parts survives; info shows the first surviving part
+                j = next((k for k, r in enumerate(rejs) if not r), 0)
+                det, rej = found[j], rejs[j]
                 info.update(status=rej or "detection", method=det.method, n_core=int(core.sum()),
-                            n_depth=int(ok.sum()))
+                            n_depth=int(ok.sum()), n_split=len(found))
                 if np.all(np.isfinite(det.top)):
                     info["top"] = _r(det.top)
                 info["uv"] = _r(det.uv, 1)

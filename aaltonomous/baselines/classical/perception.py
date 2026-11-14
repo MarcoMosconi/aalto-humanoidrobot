@@ -6,7 +6,10 @@ target is the centre of its top face.
 
 Per colour: HSV threshold (config.yaml perception.hsv) -> opening -> connected components. Per blob: erode, take
 the pixels with valid depth, deproject them (calibration.yaml intrinsics + T_pelvis_optical), keep the top face
-(points within `top_band` of a robust max height) and use the median of those as the top centre. With too few valid
+(points within `top_band` of a robust max height) and use the median of those as the top centre. A top face whose
+convex hull is larger than `max_top_area` (in object size^2; one object is <= 1) is several touching same-colour
+objects merged into one blob: its points are split with k-means (smallest k whose clusters all fit), one detection
+per cluster (method "split"). With too few valid
 depth pixels (holes, or no depth stream) the blob centroid ray is intersected with the plane at the known object
 height instead (method "plane"). Blobs over the bins, off the mat, or at a wrong height are rejected.
 """
@@ -23,7 +26,7 @@ class Detection:
     top: np.ndarray            # top-face centre, pelvis frame (m)
     n_px: int
     n_depth: int
-    method: str                # "depth" | "plane"
+    method: str                # "depth" | "split" (one of several objects in a merged blob) | "plane"
     yaw: float | None = None   # in-plane orientation of the top face (rad), info only
     uv: tuple = field(default=(0.0, 0.0))
 
@@ -82,16 +85,17 @@ class Perception:
                 v, u = np.nonzero(core)
                 d = depth[v, u].astype(float) if depth is not None else np.zeros(len(u))
                 ok = (d >= dlo) & (d <= dhi)
-                det = None
+                found = []
                 if ok.sum() >= c["min_valid_depth_px"]:
-                    det = self._from_depth(color, u[ok], v[ok], d[ok], area)
-                if det is None:
-                    det = self._from_plane(color, cent[i], area, int(ok.sum()))
-                why = self._reject(det)
-                if why:
-                    rejected.append((det, why))
-                else:
-                    dets.append(det)
+                    found = self._from_depth(color, u[ok], v[ok], d[ok], area)
+                if not found:
+                    found = [self._from_plane(color, cent[i], area, int(ok.sum()))]
+                for det in found:
+                    why = self._reject(det)
+                    if why:
+                        rejected.append((det, why))
+                    else:
+                        dets.append(det)
         return (dets, rejected) if debug else dets
 
     def _keep_mask(self, depth):
@@ -136,18 +140,51 @@ class Perception:
         return keep
 
     def _from_depth(self, color, u, v, d, area):
+        """-> list of Detections: one, or several when the top face is too big for one object (merged blob)."""
         P = self.cal.pixel_to_pelvis(self.cam, u, v, d)
         z_top = np.percentile(P[:, 2], self.cfg["top_percentile"])
-        top = P[P[:, 2] >= z_top - self.cfg["top_band"]]
+        sel = P[:, 2] >= z_top - self.cfg["top_band"]
+        top = P[sel]
         if len(top) < 5:
-            return None
+            return []
         # pixels sample the top face unevenly (perspective): weight each by its footprint ~ depth^2
-        w = (d[P[:, 2] >= z_top - self.cfg["top_band"]] / 1000.0) ** 2
-        xy = (top[:, :2] * w[:, None]).sum(0) / w.sum()
-        z = float(np.median(top[:, 2]))
-        xy = xy + self.xy_offset
-        return Detection(color, np.array([xy[0], xy[1], z]), area, len(u), "depth", _yaw(top[:, :2]),
-                         (float(np.median(u)), float(np.median(v))))
+        w = (d[sel] / 1000.0) ** 2
+        us, vs = u[sel], v[sel]
+        parts = self._split(top[:, :2])
+        method = "split" if len(parts) > 1 else "depth"
+        out = []
+        for idx in parts:
+            if len(idx) < 5:
+                continue
+            t, wi = top[idx], w[idx]
+            xy = (t[:, :2] * wi[:, None]).sum(0) / wi.sum() + self.xy_offset
+            z = float(np.median(t[:, 2]))
+            n_px = int(round(area * len(idx) / len(top)))
+            out.append(Detection(color, np.array([xy[0], xy[1], z]), n_px, len(idx), method, _yaw(t[:, :2]),
+                                 (float(np.median(us[idx])), float(np.median(vs[idx])))))
+        return out
+
+    def _split(self, xy):
+        """Top-face points (n, 2) -> list of index arrays, one per object. One object's top face has a convex hull
+        of <= size^2 (cube; cylinder/triangle less); above `max_top_area` * size^2 the blob holds several touching
+        same-colour objects: k-means with the smallest k (2..max_split) whose every cluster hull fits."""
+        import cv2
+        lim = float(self.cfg.get("max_top_area") or 0) * self.size ** 2
+        everything = [np.arange(len(xy))]
+        if lim <= 0 or _hull_area(xy) <= lim:
+            return everything
+        pts = np.ascontiguousarray(xy, np.float32)
+        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 1e-5)
+        best = everything
+        for k in range(2, int(self.cfg.get("max_split", 4)) + 1):
+            if len(pts) < 5 * k:
+                break
+            cv2.setRNGSeed(k)  # deterministic
+            _, lab, _ = cv2.kmeans(pts, k, None, crit, 5, cv2.KMEANS_PP_CENTERS)
+            best = [np.flatnonzero(lab.ravel() == j) for j in range(k)]
+            if all(_hull_area(xy[idx]) <= lim for idx in best):
+                break
+        return best
 
     def _from_plane(self, color, uv, area, n_depth):
         """Centroid ray of the blob intersected with the horizontal plane at the object's top."""
@@ -185,6 +222,14 @@ class Perception:
             if np.all(np.abs(pm[:2] - np.asarray(ctr, float)) <= half):
                 return f"in_bin:{name}"
         return None
+
+
+def _hull_area(xy):
+    """Area (m^2) of the convex hull of points (n, 2)."""
+    import cv2
+    if len(xy) < 3:
+        return 0.0
+    return float(cv2.contourArea(cv2.convexHull(np.ascontiguousarray(xy, np.float32))))
 
 
 def _yaw(xy):

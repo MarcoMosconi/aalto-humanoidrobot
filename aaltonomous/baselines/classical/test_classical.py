@@ -64,6 +64,22 @@ class TestPerception(unittest.TestCase):
         dets = self._check(rgb, np.zeros(rgb.shape[:2], np.uint16), objs, 0.025)
         self.assertTrue(all(d.method == "plane" for d in dets))
 
+    def test_touching_same_colour_objects_are_split(self):
+        """Touching same-colour cubes form one blob; its top face exceeds max_top_area -> one detection each."""
+        rng = np.random.default_rng(2)
+        h, s = SC.object_height(), SC.size
+        for n in (2, 3):
+            objs = [dict(color="blue", shape="cube", yaw=0.0, size=s, height=h,
+                         pos=SC.mat_to_pelvis([0.40 + k * s, 0.16, h / 2])) for k in range(n)]
+            rgb, depth = self.r.render(objs, rng, depth_noise_mm=1.5)
+            dets = self.p.detect(rgb, depth)
+            self.assertEqual(len(dets), n, dets)
+            self.assertTrue(all(d.method == "split" for d in dets))
+            for o in objs:
+                top = o["pos"] + [0, 0, h / 2]
+                err = min(np.linalg.norm(d.top[:2] - top[:2]) for d in dets)
+                self.assertLess(err, 0.012, f"n={n} err {err * 1000:.1f} mm")
+
     def test_bins_are_not_objects(self):
         rgb, depth = self.r.render([])
         self.assertEqual(self.p.detect(rgb, depth), [])

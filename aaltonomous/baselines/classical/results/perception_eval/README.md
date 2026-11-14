@@ -6,6 +6,11 @@ of xy error, and most of that error is a constant offset that can be corrected. 
 problems that a plain HSV-blob detector cannot solve (touching same-colour objects, objects behind the hands). They
 are not threshold problems.
 
+**Update (same day): merged blobs are now split.** A blob whose top face is bigger than one object
+(`perception.max_top_area`) is split with k-means. The crowded scenario goes from 0.82 to 0.98 recall, and no object
+is missed as `merged` any more (see finding 2). The tables below are for the current code. The numbers from before the
+split are kept in the "before" row.
+
 ## How
 
 `python -m aaltonomous.baselines.classical.perception_eval` (see its docstring) runs the steps below, with no arm motion:
@@ -36,14 +41,18 @@ Each missed object gets one of these causes:
 | scenario | recall | recall (in view) | frames all found | false pos. | xy err median / p90 / max (mm) | xy err, bias removed, median / p90 | miss causes |
 |---|---|---|---|---|---|---|---|
 | random | **1.00** | 1.00 | 12/12 | 1 | 5.6 / 11.6 / 17.5 | 1.8 / 8.9 | none |
-| crowded | 0.82 | 0.82 | 4/12 | 2 | 6.5 / 23.8 / 36.0 | 2.0 / 20.4 | merged 9, occluded 1 |
+| crowded | **0.98** | 0.98 | 11/12 | 2 | 5.9 / 11.0 / 19.7 | 1.0 / 7.8 | occluded 1 |
 | near_bins | 0.83 | 0.90 | 3/12 | 5 | 6.9 / 15.9 / 28.7 | 3.1 / 13.1 | occluded 5, out_of_view 4 |
 | wide | 0.63 | 0.94 | 1/12 | 1 | 6.4 / 19.8 / 23.1 | 4.4 / 17.6 | out_of_view 16, occluded 2 |
-| **all** | 0.83 | 0.91 | 20/48 | 9 | 6.3 / 17.2 / 36.0 | 2.0 / 16.7 | out_of_view 20, merged 9, occluded 8, **detector 0** |
+| **all** | 0.87 | 0.96 | 27/48 | 9 | 6.1 / 14.7 / 28.7 | 1.7 / 11.3 | out_of_view 20, occluded 8, **merged 0, detector 0** |
+| *crowded, before the split* | *0.82* | *0.82* | *4/12* | *2* | *6.5 / 23.8 / 36.0* | *2.0 / 20.4* | *merged 9, occluded 1* |
+| *all, before the split* | *0.83* | *0.91* | *20/48* | *9* | *6.3 / 17.2 / 36.0* | *2.0 / 16.7* | *out_of_view 20, merged 9, occluded 8* |
 
 Other numbers:
-- Every detection came from depth; the plane fallback never triggered.
-- detect() takes 42 ms median per frame on the CPU (max 65 ms).
+- Every detection came from depth; the plane fallback never triggered. 17 of the 183 matched detections come from a
+  split blob (method `split`, all in `crowded`), and no single-object blob was split by mistake.
+- detect() takes 44 ms median per frame on the CPU. Without splitting the max is 50 ms; frames that need k-means
+  take up to 113 ms.
 - z error is +5.9 mm median, and very consistent (p90 6.5 mm).
 - Cube yaw (from the `minAreaRect` the code already computes, compared mod 90°) has a median error of 0.2°. It is
   wrong (20-42°) only when the blob is merged or clipped, and those are the same frames that have large xy errors.
@@ -57,8 +66,8 @@ The full per-frame data is in `summary.json` and `frames.jsonl`. `img/` holds ov
 
 ## Findings
 
-1. **A constant offset makes up most of the error.** Detections average +3.8 mm in x and +4.3 mm in y (pelvis
-   frame), and z is +5.9 mm. Removing the mean offset brings the median xy error down from 6.3 mm to 2.0 mm.
+1. **A constant offset makes up most of the error.** Detections average +3.4 mm in x and +4.4 mm in y (pelvis
+   frame), and z is +5.9 mm. Removing the mean offset brings the median xy error down from 6.1 mm to 1.7 mm.
    - The y error depends on position: +8.3 mm at pelvis y in [-0.2, -0.1) and +1.1 mm at y in [+0.1, +0.2]. That
      pattern fits a small yaw or roll error in the head camera extrinsics (calibration.yaml vs. the sim camera
      mount), rather than a pure translation.
@@ -68,10 +77,16 @@ The full per-frame data is in `summary.json` and `frames.jsonl`. `img/` holds ov
      `perception.xy_offset ≈ [-0.004, -0.004]`. Checked offline on the same `random` frames, it lowers the median xy
      error from 5.6 mm to 2.0 mm and the p90 from 11.6 mm to 9.6 mm, with recall unchanged at 1.00. Better is to
      re-derive `T_pelvis_optical` for the sim.
-2. **Touching same-colour objects merge** (crowded: 9 of 10 misses). Two or three same-colour objects become one
-   blob, and the one detection lands between them (20-36 mm off), so the grasp hits an edge. A fix needs to split
-   blobs: a distance transform plus watershed on the mask, or splitting by expected area (n ≈ area / single-object
-   area).
+2. **Touching same-colour objects merged; fixed by splitting on top-face area.** Before the fix, two or three
+   same-colour objects became one blob (crowded: 9 of 10 misses), and the one detection landed between them (20-36 mm
+   off), so the grasp hit an edge.
+   - The limit is the area of the top face's convex hull in the pelvis frame, in object size². Pixel area does not
+     work: a single near object reached 5453 px, while a merged pair farther away was only 6038 px. In metric units the
+     two separate cleanly: one object ≤ 0.99 size², merged blobs ≥ 1.92 size². `max_top_area: 1.5` sits between them.
+   - Above the limit, the top-face points are split with k-means, using the smallest k (2..`max_split`) for which every
+     cluster's hull fits under the limit. Each cluster becomes one detection.
+   - Result: all 9 merged objects are found, crowded xy p90 drops from 23.8 to 11.0 mm, and there are no new false
+     positives. Limit: there is no split without depth (plane fallback).
 3. **The home-pose hands cover the mat edges** (near_bins and wide: 7 occluded, plus several false positives where a
    finger cuts a blob in two). The classical policy's own `home_arm_q` (arms out to the sides) avoids most of this.
    Any policy that looks from `ARM_HOME` must move the hands out of view first, or ignore blobs that touch hand pixels.

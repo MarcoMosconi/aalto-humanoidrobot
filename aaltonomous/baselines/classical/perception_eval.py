@@ -224,7 +224,7 @@ def summarize(rows):
         "err_xy_mm": stats(xy), "err_z_mm": stats(z),
         "err_x_mm_mean_signed": round(float(np.mean([m["dx_mm"] for r in rows for m in r["matches"]])), 2) if xy else None,
         "err_y_mm_mean_signed": round(float(np.mean([m["dy_mm"] for r in rows for m in r["matches"]])), 2) if xy else None,
-        "method": {k: sum(m["method"] == k for r in rows for m in r["matches"]) for k in ("depth", "plane")},
+        "method": {k: sum(m["method"] == k for r in rows for m in r["matches"]) for k in ("depth", "split", "plane")},
         "yaw_err_deg_cube": stats([m["yaw_err_deg"] for r in rows for m in r["matches"]
                                    if m["shape"] == "cube" and m["yaw_err_deg"] is not None]),
         "missed_why": {},

@@ -184,6 +184,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 // ---------------------------------------------------------------- params
 const SCALARS = [
   ["open_px", "opening kernel (px)", 1], ["erode_px", "erode before depth (px)", 1], ["min_area_px", "min blob area (px)", 10],
+  ["max_top_area", "max top area (size², split above)", 0.1],
   ["min_valid_depth_px", "min depth px (else plane)", 5], ["top_band", "top band (m)", 0.001], ["top_percentile", "top percentile", 1],
   ["height_range.0", "min height (sizes)", 0.05], ["height_range.1", "max height (sizes)", 0.1],
   ["bin_pixel_margin", "bin pixel margin (m)", 0.001], ["bin_exclusion_margin", "bin centre margin (m)", 0.005],
