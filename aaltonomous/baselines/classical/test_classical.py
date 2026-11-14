@@ -80,6 +80,38 @@ class TestPerception(unittest.TestCase):
                 err = min(np.linalg.norm(d.top[:2] - top[:2]) for d in dets)
                 self.assertLess(err, 0.012, f"n={n} err {err * 1000:.1f} mm")
 
+    def test_piece_cut_off_by_a_finger_is_joined(self):
+        """A finger (grey stripe, nearer depth) across a cube cuts its blob in two: one detection, not two."""
+        rng = np.random.default_rng(3)
+        h, s = SC.object_height(), SC.size
+        o = dict(color="red", shape="cube", yaw=0.0, size=s, height=h, pos=SC.mat_to_pelvis([0.45, 0.16, h / 2]))
+        rgb, depth = self.r.render([o], rng, depth_noise_mm=1.5)
+        # image extent of the top face; the stripe leaves a narrow piece (< min_top_area) on one side
+        corners = np.array([o["pos"] + [dx, dy, h / 2] for dx in (-s / 2, s / 2) for dy in (-s / 2, s / 2)])
+        u = CAL.project(self.p.cam, corners)[:, 0]
+        u0, u1 = int(u.min()), int(u.max())
+        a = u0 + int(0.15 * (u1 - u0))
+        rgb, depth = rgb.copy(), depth.copy()
+        rgb[:, a:a + 8] = 60
+        depth[:, a:a + 8] = (depth[:, a:a + 8].astype(float) * 0.8).astype(depth.dtype)
+        cut = Perception(load_config(None, {"perception.min_top_area": 0}), SC, CAL).detect(rgb, depth)
+        self.assertEqual(len(cut), 2, f"stripe should cut the blob in two: {cut}")
+        dets = self.p.detect(rgb, depth)
+        self.assertEqual(len(dets), 1, dets)
+        self.assertEqual(dets[0].method, "joined")
+        self.assertLess(np.linalg.norm(dets[0].top[:2] - o["pos"][:2]), 0.012)
+
+    def test_separate_same_colour_objects_are_not_joined(self):
+        """Two whole same-colour objects 1.5 cm apart (within merge_gap) stay two detections."""
+        rng = np.random.default_rng(4)
+        h, s = SC.object_height(), SC.size
+        objs = [dict(color="yellow", shape="cylinder", yaw=0.0, size=s, height=h,
+                     pos=SC.mat_to_pelvis([0.40 + k * (s + 0.015), 0.16, h / 2])) for k in range(2)]
+        rgb, depth = self.r.render(objs, rng, depth_noise_mm=1.5)
+        dets = self.p.detect(rgb, depth)
+        self.assertEqual(len(dets), 2, dets)
+        self.assertTrue(all(d.method == "depth" for d in dets))
+
     def test_bins_are_not_objects(self):
         rgb, depth = self.r.render([])
         self.assertEqual(self.p.detect(rgb, depth), [])

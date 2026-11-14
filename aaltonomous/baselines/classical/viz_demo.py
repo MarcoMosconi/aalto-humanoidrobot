@@ -137,49 +137,38 @@ class Engine:
             why[vv, uu] = code
         else:
             why[keep == 0] = 3
+        # the same blobs + grouping as Perception.detect (pieces cut by a hand joined, oversized top faces split)
         blobs = []
-        k = int(c["open_px"])
-        for color, m0 in raw.items():
-            m = m0 & keep
-            if k > 0:
-                m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
-            n, lab, stats, cent = cv2.connectedComponentsWithStats(m, connectivity=8)
-            for i in range(1, n):
-                area = int(stats[i, cv2.CC_STAT_AREA])
-                blob = (lab == i).astype(np.uint8)
-                info = {"color": color, "area": area, "bbox": stats[i, :4].tolist()}
-                if area < c["min_area_px"]:
-                    info["status"] = f"small ({area} px)"
-                    blobs.append((info, blob, None, None))
-                    continue
-                e = int(c["erode_px"])
-                core = cv2.erode(blob, np.ones((2 * e + 1, 2 * e + 1), np.uint8)) if e > 0 else blob
-                if core.sum() < 0.25 * area:
-                    core = blob
-                v, u = np.nonzero(core)
-                dd = depth[v, u].astype(float)
-                ok = (dd >= dlo) & (dd <= dhi)
-                top_uv = None
-                found = []
-                if ok.sum() >= c["min_valid_depth_px"]:
-                    found = per._from_depth(color, u[ok], v[ok], dd[ok], area)
-                    P = self.cal.pixel_to_pelvis(per.cam, u[ok], v[ok], dd[ok])
-                    z_top = np.percentile(P[:, 2], c["top_percentile"])
-                    sel = P[:, 2] >= z_top - c["top_band"]
-                    top_uv = (u[ok][sel], v[ok][sel], P[sel])
-                if not found:
-                    found = [per._from_plane(color, cent[i], area, int(ok.sum()))]
+        comps = per.components(rgb, depth, keep_small=True)
+        for info_c in comps:
+            if info_c["small"]:
+                info = {"color": info_c["color"], "area": info_c["area"], "bbox": info_c["bbox"],
+                        "status": f"small ({info_c['area']} px)"}
+                blobs.append((info, info_c["blob"], None, None))
+        for color in per.cfg["hsv"]:
+            big = [b for b in comps if b["color"] == color and not b["small"]]
+            for g, found in per.group(color, big):
                 rejs = [per._reject(dt) for dt in found]
-                # a split blob is a "detection" if any of its parts survives; info shows the first surviving part
+                # the group is a "detection" if any part survives; info shows the first surviving part
                 j = next((k for k, r in enumerate(rejs) if not r), 0)
                 det, rej = found[j], rejs[j]
-                info.update(status=rej or "detection", method=det.method, n_core=int(core.sum()),
-                            n_depth=int(ok.sum()), n_split=len(found),
-                            parts_uv=[_r(dt.uv, 1) for dt, r in zip(found, rejs) if not r])
-                if np.all(np.isfinite(det.top)):
-                    info["top"] = _r(det.top)
-                info["uv"] = _r(det.uv, 1)
-                blobs.append((info, blob, core, top_uv))
+                top_uv = None
+                u, v, dd = (np.concatenate([big[k][x] for k in g]) for x in "uvd")
+                if len(u) >= c["min_valid_depth_px"]:
+                    P = self.cal.pixel_to_pelvis(per.cam, u, v, dd)
+                    sel = per._top_sel(P)
+                    top_uv = (u[sel], v[sel], P[sel])
+                for n, k in enumerate(g):
+                    b = big[k]
+                    info = {"color": color, "area": b["area"], "bbox": b["bbox"], "status": rej or "detection",
+                            "method": det.method, "n_core": int(b["core"].sum()), "n_depth": int(len(b["u"])),
+                            "n_split": len(found), "n_joined": len(g)}
+                    if n == 0:  # the group's detections + pooled top face are drawn once, on its first blob
+                        if np.all(np.isfinite(det.top)):
+                            info["top"] = _r(det.top)
+                        info["uv"] = _r(det.uv, 1)
+                        info["parts_uv"] = [_r(dt.uv, 1) for dt, r in zip(found, rejs) if not r]
+                    blobs.append((info, b["blob"], b["core"], top_uv if n == 0 else None))
         return raw, keep, why, blobs
 
     def run_frame(self, name, overrides):
@@ -243,11 +232,12 @@ class Engine:
                 cv2.putText(b_img, info["status"][:16], (x, max(10, y - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33,
                             (180, 180, 180), 1)
             if ok:
-                for u, v in info.get("parts_uv") or [info["uv"]]:  # one dot per detection (several if split)
+                for u, v in info.get("parts_uv") or []:  # one dot per detection (several if split)
                     cv2.circle(b_img, (int(u), int(v)), 3, (0, 255, 0), -1)
-                if info.get("n_split", 1) > 1:
-                    cv2.putText(b_img, f"split x{info['n_split']}", (x, max(10, y - 3)), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.33, (0, 255, 0), 1)
+                tag = (f"split x{info['n_split']}" if info.get("n_split", 1) > 1 else
+                       f"joined x{info['n_joined']}" if info.get("n_joined", 1) > 1 else "")
+                if tag:
+                    cv2.putText(b_img, tag, (x, max(10, y - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (0, 255, 0), 1)
         imgs["blobs"] = _b64(b_img)
 
         why_s = ",".join(m["why"] for m in row["missed"])

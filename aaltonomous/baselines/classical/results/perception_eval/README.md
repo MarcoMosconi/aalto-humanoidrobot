@@ -8,8 +8,12 @@ are not threshold problems.
 
 **Update (same day): merged blobs are now split.** A blob whose top face is bigger than one object
 (`perception.max_top_area`) is split with k-means. The crowded scenario goes from 0.82 to 0.98 recall, and no object
-is missed as `merged` any more (see finding 2). The tables below are for the current code. The numbers from before the
-split are kept in the "before" row.
+is missed as `merged` any more (see finding 2).
+
+**Update 2: pieces cut off by a hand are joined.** A blob piece whose top face is smaller than one object
+(`perception.min_top_area`) with a same-colour blob within `merge_gap` is pooled with it into one detection. This
+removes all 9 false positives (see finding 3). The tables below are for the current code. The numbers from before both
+changes are kept in the "before" rows.
 
 ## How
 
@@ -40,19 +44,21 @@ Each missed object gets one of these causes:
 
 | scenario | recall | recall (in view) | frames all found | false pos. | xy err median / p90 / max (mm) | xy err, bias removed, median / p90 | miss causes |
 |---|---|---|---|---|---|---|---|
-| random | **1.00** | 1.00 | 12/12 | 1 | 5.6 / 11.6 / 17.5 | 1.8 / 8.9 | none |
-| crowded | **0.98** | 0.98 | 11/12 | 2 | 5.9 / 11.0 / 19.7 | 1.0 / 7.8 | occluded 1 |
-| near_bins | 0.83 | 0.90 | 3/12 | 5 | 6.9 / 15.9 / 28.7 | 3.1 / 13.1 | occluded 5, out_of_view 4 |
-| wide | 0.63 | 0.94 | 1/12 | 1 | 6.4 / 19.8 / 23.1 | 4.4 / 17.6 | out_of_view 16, occluded 2 |
-| **all** | 0.87 | 0.96 | 27/48 | 9 | 6.1 / 14.7 / 28.7 | 1.7 / 11.3 | out_of_view 20, occluded 8, **merged 0, detector 0** |
-| *crowded, before the split* | *0.82* | *0.82* | *4/12* | *2* | *6.5 / 23.8 / 36.0* | *2.0 / 20.4* | *merged 9, occluded 1* |
-| *all, before the split* | *0.83* | *0.91* | *20/48* | *9* | *6.3 / 17.2 / 36.0* | *2.0 / 16.7* | *out_of_view 20, merged 9, occluded 8* |
+| random | **1.00** | 1.00 | 12/12 | 0 | 5.6 / 11.6 / 16.7 | 1.8 / 8.7 | none |
+| crowded | **0.98** | 0.98 | 11/12 | 0 | 5.9 / 10.4 / 19.7 | 1.0 / 6.9 | occluded 1 |
+| near_bins | 0.83 | 0.90 | 3/12 | 0 | 6.9 / 15.5 / 28.7 | 3.5 / 10.3 | occluded 5, out_of_view 4 |
+| wide | 0.63 | 0.94 | 1/12 | 0 | 6.4 / 19.8 / 23.1 | 4.4 / 17.6 | out_of_view 16, occluded 2 |
+| **all** | 0.87 | 0.96 | 27/48 | **0** | 6.1 / 14.0 / 28.7 | 1.8 / 10.7 | out_of_view 20, occluded 8, **merged 0, detector 0** |
+| *crowded, before both* | *0.82* | *0.82* | *4/12* | *2* | *6.5 / 23.8 / 36.0* | *2.0 / 20.4* | *merged 9, occluded 1* |
+| *all, before both* | *0.83* | *0.91* | *20/48* | *9* | *6.3 / 17.2 / 36.0* | *2.0 / 16.7* | *out_of_view 20, merged 9, occluded 8* |
 
 Other numbers:
-- Every detection came from depth; the plane fallback never triggered. 17 of the 183 matched detections come from a
-  split blob (method `split`, all in `crowded`), and no single-object blob was split by mistake.
-- detect() takes 44 ms median per frame on the CPU. Without splitting the max is 50 ms; frames that need k-means
-  take up to 113 ms.
+- Every detection came from depth; the plane fallback never triggered. Of the 183 matched detections, 17 come from a
+  split blob (method `split`, all in `crowded`) and 9 from joined pieces (method `joined`, the 9 frames that had a
+  false positive before). No single object was split or joined by mistake. Frames with no false positive and every
+  object found: 27/48 (was 16/48 before both changes).
+- detect() takes 50 ms median per frame on the CPU, 65 ms max. The first frame of a process takes ~250 ms once
+  (scipy import for the join).
 - z error is +5.9 mm median, and very consistent (p90 6.5 mm).
 - Cube yaw (from the `minAreaRect` the code already computes, compared mod 90°) has a median error of 0.2°. It is
   wrong (20-42°) only when the blob is merged or clipped, and those are the same frames that have large xy errors.
@@ -66,8 +72,8 @@ The full per-frame data is in `summary.json` and `frames.jsonl`. `img/` holds ov
 
 ## Findings
 
-1. **A constant offset makes up most of the error.** Detections average +3.4 mm in x and +4.4 mm in y (pelvis
-   frame), and z is +5.9 mm. Removing the mean offset brings the median xy error down from 6.1 mm to 1.7 mm.
+1. **A constant offset makes up most of the error.** Detections average +3.6 mm in x and +4.4 mm in y (pelvis
+   frame), and z is +5.9 mm. Removing the mean offset brings the median xy error down from 6.1 mm to 1.8 mm.
    - The y error depends on position: +8.3 mm at pelvis y in [-0.2, -0.1) and +1.1 mm at y in [+0.1, +0.2]. That
      pattern fits a small yaw or roll error in the head camera extrinsics (calibration.yaml vs. the sim camera
      mount), rather than a pure translation.
@@ -87,9 +93,18 @@ The full per-frame data is in `summary.json` and `frames.jsonl`. `img/` holds ov
      cluster's hull fits under the limit. Each cluster becomes one detection.
    - Result: all 9 merged objects are found, crowded xy p90 drops from 23.8 to 11.0 mm, and there are no new false
      positives. Limit: there is no split without depth (plane fallback).
-3. **The home-pose hands cover the mat edges** (near_bins and wide: 7 occluded, plus several false positives where a
-   finger cuts a blob in two). The classical policy's own `home_arm_q` (arms out to the sides) avoids most of this.
-   Any policy that looks from `ARM_HOME` must move the hands out of view first, or ignore blobs that touch hand pixels.
+3. **The home-pose hands cover the mat edges** (near_bins and wide: 7 occluded). The classical policy's own
+   `home_arm_q` (arms out to the sides) avoids most of this. Any policy that looks from `ARM_HOME` must move the hands
+   out of view first, or ignore blobs that touch hand pixels.
+   - **Pieces cut off by a finger: fixed by joining.** Before, a finger across an object cut its blob in two, and the
+     small piece became a second detection: all 9 false positives were such pieces, of an object that was also found.
+     The pieces had top faces of 0.00-0.43 size² (8 of 9 under 0.08) and lay 0-25 mm from the rest of the object.
+     Some showed only a side face, up to 25 mm below the top.
+   - Now a piece with a top face under `min_top_area: 0.5` size² is joined to the nearest same-colour blob within
+     `merge_gap: 0.03` m, as long as the pooled top face still fits one object (`max_top_area`). The pixels are pooled
+     and the top face is taken from all of them, so a side-face-only piece does not pull the result down. A small piece
+     with no same-colour neighbour (an object mostly behind a hand) is still detected on its own.
+   - Result: false positives 9 -> 0, recall unchanged, xy p90 14.7 -> 14.0 mm.
 4. **Out of view** (20 misses) happens only for layouts beyond `scene.yaml region_x/region_y`, mostly the near
    corners. Episode layouts never go there.
 5. **The bins fall inside the yellow HSV range.** They are removed only by the 3D bin mask and the in-bin check, and

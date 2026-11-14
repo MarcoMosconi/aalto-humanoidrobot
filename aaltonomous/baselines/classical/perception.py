@@ -9,7 +9,10 @@ the pixels with valid depth, deproject them (calibration.yaml intrinsics + T_pel
 (points within `top_band` of a robust max height) and use the median of those as the top centre. A top face whose
 convex hull is larger than `max_top_area` (in object size^2; one object is <= 1) is several touching same-colour
 objects merged into one blob: its points are split with k-means (smallest k whose clusters all fit), one detection
-per cluster (method "split"). With too few valid
+per cluster (method "split"). The opposite case: a hand in front of an object cuts its blob in pieces. A piece whose
+top face is smaller than `min_top_area` (size^2) with a same-colour blob within `merge_gap` is part of that object: the
+pieces' pixels are pooled and the top face is taken from all of them (method "joined"), as long as the pooled top face
+still fits one object (`max_top_area`). With too few valid
 depth pixels (holes, or no depth stream) the blob centroid ray is intersected with the plane at the known object
 height instead (method "plane"). Blobs over the bins, off the mat, or at a wrong height are rejected.
 """
@@ -26,7 +29,8 @@ class Detection:
     top: np.ndarray            # top-face centre, pelvis frame (m)
     n_px: int
     n_depth: int
-    method: str                # "depth" | "split" (one of several objects in a merged blob) | "plane"
+    method: str                # "depth" | "split" (one of several objects in one blob) | "joined" (pieces of one
+                               # object cut apart by a hand) | "plane"
     yaw: float | None = None   # in-plane orientation of the top face (rad), info only
     uv: tuple = field(default=(0.0, 0.0))
 
@@ -62,11 +66,26 @@ class Perception:
         return out
 
     def detect(self, rgb, depth, debug=False):
+        dets, rejected = [], []
+        comps = self.components(rgb, depth)
+        for color in self.cfg["hsv"]:
+            for _, found in self.group(color, [b for b in comps if b["color"] == color]):
+                for det in found:
+                    why = self._reject(det)
+                    if why:
+                        rejected.append((det, why))
+                    else:
+                        dets.append(det)
+        return (dets, rejected) if debug else dets
+
+    def components(self, rgb, depth, keep_small=False):
+        """Colour blobs -> list of dicts: color, blob (uint8 mask), core (eroded mask), area (px), cent (uv),
+        u/v/d (core pixels with valid depth), small (below min_area_px; only returned with keep_small)."""
         import cv2
         c = self.cfg
-        dets, rejected = [], []
         dlo, dhi = c["depth_range_mm"]
         keep = self._keep_mask(depth)
+        out = []
         for color, m in self.masks(rgb).items():
             m = m & keep  # drop bin / counter pixels BEFORE grouping, so an object touching a same-colour bin survives
             k = int(c["open_px"])
@@ -75,28 +94,101 @@ class Perception:
             n, lab, stats, cent = cv2.connectedComponentsWithStats(m, connectivity=8)
             for i in range(1, n):
                 area = int(stats[i, cv2.CC_STAT_AREA])
-                if area < c["min_area_px"]:
+                small = area < c["min_area_px"]
+                if small and not keep_small:
                     continue
                 blob = (lab == i).astype(np.uint8)
-                e = int(c["erode_px"])
-                core = cv2.erode(blob, np.ones((2 * e + 1, 2 * e + 1), np.uint8)) if e > 0 else blob
-                if core.sum() < 0.25 * area:
-                    core = blob
-                v, u = np.nonzero(core)
-                d = depth[v, u].astype(float) if depth is not None else np.zeros(len(u))
-                ok = (d >= dlo) & (d <= dhi)
-                found = []
-                if ok.sum() >= c["min_valid_depth_px"]:
-                    found = self._from_depth(color, u[ok], v[ok], d[ok], area)
-                if not found:
-                    found = [self._from_plane(color, cent[i], area, int(ok.sum()))]
+                rec = {"color": color, "blob": blob, "area": area, "cent": cent[i], "bbox": stats[i, :4].tolist(),
+                       "small": small, "core": None}
+                if not small:
+                    e = int(c["erode_px"])
+                    core = cv2.erode(blob, np.ones((2 * e + 1, 2 * e + 1), np.uint8)) if e > 0 else blob
+                    if core.sum() < 0.25 * area:
+                        core = blob
+                    v, u = np.nonzero(core)
+                    d = depth[v, u].astype(float) if depth is not None else np.zeros(len(u))
+                    ok = (d >= dlo) & (d <= dhi)
+                    rec.update(core=core, u=u[ok], v=v[ok], d=d[ok])
+                out.append(rec)
+        return out
+
+    def group(self, color, blobs):
+        """Blobs of one colour (from components(), not small) -> [(blob indices, [Detection, ...]), ...]. Blobs with
+        enough depth are grouped (pieces of one object cut by a hand are joined) and turned into detections from
+        depth (split when too big); the rest fall back to the plane, one detection per blob."""
+        c = self.cfg
+        deep = [k for k, b in enumerate(blobs) if len(b["u"]) >= c["min_valid_depth_px"]]
+        out = []
+        for g in self._join(blobs, deep):
+            u, v, d = (np.concatenate([blobs[k][x] for k in g]) for x in "uvd")
+            found = self._from_depth(color, u, v, d, sum(blobs[k]["area"] for k in g))
+            if found and len(g) > 1:
                 for det in found:
-                    why = self._reject(det)
-                    if why:
-                        rejected.append((det, why))
-                    else:
-                        dets.append(det)
-        return (dets, rejected) if debug else dets
+                    if det.method == "depth":
+                        det.method = "joined"
+            if not found:  # top face too thin: plane from the largest piece
+                k = max(g, key=lambda k: blobs[k]["area"])
+                found = [self._from_plane(color, blobs[k]["cent"], blobs[k]["area"], len(blobs[k]["u"]))]
+            out.append((g, found))
+        for k, b in enumerate(blobs):
+            if k not in deep:
+                out.append(([k], [self._from_plane(color, b["cent"], b["area"], len(b["u"]))]))
+        return out
+
+    def _join(self, blobs, idx):
+        """Union of blob pieces cut apart by an occluder (hand): a piece whose top face is below min_top_area * size^2
+        is joined to the nearest same-colour group within merge_gap (3D, xy) if the pooled top face still fits one
+        object (<= max_top_area * size^2). -> list of index lists."""
+        from scipy.spatial import cKDTree
+        c = self.cfg
+        groups = [[k] for k in idx]
+        lim_small = float(c.get("min_top_area") or 0) * self.size ** 2
+        if lim_small <= 0 or len(groups) < 2:
+            return groups
+        lim_big = float(c.get("max_top_area") or 0) * self.size ** 2
+        gap = float(c.get("merge_gap", 0.03))
+        P = {k: self.cal.pixel_to_pelvis(self.cam, blobs[k]["u"], blobs[k]["v"], blobs[k]["d"]) for k in idx}
+        memo = {}  # per group (sorted index tuple): xy points, xy bbox, top-face hull area, k-d tree
+
+        def info(g):
+            key = tuple(sorted(g))
+            if key not in memo:
+                Q = np.vstack([P[k] for k in g])
+                memo[key] = {"xy": Q[:, :2], "lo": Q[:, :2].min(0), "hi": Q[:, :2].max(0),
+                             "area": _hull_area(Q[self._top_sel(Q)][:, :2]), "tree": None}
+            return memo[key]
+
+        def dist(a, b):
+            ia, ib = info(a), info(b)
+            if np.any(ia["lo"] - ib["hi"] > gap) or np.any(ib["lo"] - ia["hi"] > gap):
+                return np.inf  # bounding boxes already farther apart than the gap
+            if ib["tree"] is None:
+                ib["tree"] = cKDTree(ib["xy"])
+            return float(ib["tree"].query(ia["xy"], k=1, distance_upper_bound=gap)[0].min())
+
+        changed = True
+        while changed:
+            changed = False
+            for gi in sorted(range(len(groups)), key=lambda i: info(groups[i])["area"]):
+                g = groups[gi]
+                if info(g)["area"] >= lim_small:
+                    break  # sorted by area: every remaining group is a whole object
+                best = None
+                for gj, h in enumerate(groups):
+                    if gj == gi:
+                        continue
+                    dd = dist(g, h)
+                    if dd <= gap and (best is None or dd < best[0]):
+                        best = (dd, gj)
+                if best is None:
+                    continue
+                merged = g + groups[best[1]]
+                if lim_big > 0 and info(merged)["area"] > lim_big:
+                    continue
+                groups = [x for k, x in enumerate(groups) if k not in (gi, best[1])] + [merged]
+                changed = True
+                break
+        return groups
 
     def _keep_mask(self, depth):
         """uint8 mask of pixels that may belong to an object: no valid depth (unknown), or a 3D point at object
@@ -142,8 +234,7 @@ class Perception:
     def _from_depth(self, color, u, v, d, area):
         """-> list of Detections: one, or several when the top face is too big for one object (merged blob)."""
         P = self.cal.pixel_to_pelvis(self.cam, u, v, d)
-        z_top = np.percentile(P[:, 2], self.cfg["top_percentile"])
-        sel = P[:, 2] >= z_top - self.cfg["top_band"]
+        sel = self._top_sel(P)
         top = P[sel]
         if len(top) < 5:
             return []
@@ -163,6 +254,11 @@ class Perception:
             out.append(Detection(color, np.array([xy[0], xy[1], z]), n_px, len(idx), method, _yaw(t[:, :2]),
                                  (float(np.median(us[idx])), float(np.median(vs[idx])))))
         return out
+
+    def _top_sel(self, P):
+        """Mask of the top-face points: within top_band of a robust (percentile) max height."""
+        z_top = np.percentile(P[:, 2], self.cfg["top_percentile"])
+        return P[:, 2] >= z_top - self.cfg["top_band"]
 
     def _split(self, xy):
         """Top-face points (n, 2) -> list of index arrays, one per object. One object's top face has a convex hull

@@ -27,6 +27,11 @@ perception:
   # split with k-means. Sim (perception_eval raw frames): single objects <= 0.99, merged pairs >= 1.92. 0 = off.
   max_top_area: 1.5
   max_split: 4                # most objects one blob is split into
+  # Min top-face area of a WHOLE object, in object size^2. A smaller piece with a same-colour blob within merge_gap
+  # is a part of that object cut off by a hand (finger across it) and is joined to it. Sim: such pieces 0.00-0.43,
+  # 0-25 mm from the rest of the object. 0 = off.
+  min_top_area: 0.5
+  merge_gap: 0.03             # m, xy distance between the pieces (a finger is ~2 cm wide)
   min_valid_depth_px: 25      # fewer valid depth pixels -> fall back to ray / plane at known object height
   depth_range_mm: [150, 2000]
   top_band: 0.006             # points within this of the highest (robust) point count as the top face

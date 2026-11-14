@@ -9,27 +9,28 @@
   "objects": 211,
   "recall": 0.867,
   "frames_all_found": 0.562,
-  "false_positives": 9,
-  "frames_clean": 0.479,
+  "false_positives": 0,
+  "frames_clean": 0.562,
   "err_xy_mm": {
    "n": 183,
-   "mean": 7.51,
+   "mean": 7.38,
    "median": 6.09,
-   "p90": 14.65,
+   "p90": 14.04,
    "max": 28.72
   },
   "err_z_mm": {
    "n": 183,
-   "mean": 5.49,
+   "mean": 5.7,
    "median": 5.92,
    "p90": 6.47,
-   "max": 6.61
+   "max": 6.59
   },
-  "err_x_mm_mean_signed": 3.4,
-  "err_y_mm_mean_signed": 4.37,
+  "err_x_mm_mean_signed": 3.55,
+  "err_y_mm_mean_signed": 4.43,
   "method": {
-   "depth": 166,
+   "depth": 157,
    "split": 17,
+   "joined": 9,
    "plane": 0
   },
   "yaw_err_deg_cube": {
@@ -44,8 +45,8 @@
    "out_of_view": 20
   },
   "rejected": {
-   "in_bin": 285,
-   "height": 87
+   "in_bin": 246,
+   "height": 4
   },
   "missed_by_shape": {
    "triangle": 9,
@@ -60,10 +61,10 @@
   "recall_in_view": 0.958,
   "err_xy_mm_bias_removed": {
    "n": 183,
-   "mean": 4.18,
-   "median": 1.67,
-   "p90": 11.27,
-   "max": 29.18
+   "mean": 4.02,
+   "median": 1.75,
+   "p90": 10.68,
+   "max": 29.12
   },
   "xy_by_shape": {
    "cube": {
@@ -75,14 +76,14 @@
    },
    "cylinder": {
     "n": 66,
-    "mean": 7.15,
+    "mean": 6.83,
     "median": 5.96,
-    "p90": 13.43,
-    "max": 24.02
+    "p90": 11.57,
+    "max": 23.29
    },
    "triangle": {
     "n": 63,
-    "mean": 7.3,
+    "mean": 7.26,
     "median": 6.0,
     "p90": 13.42,
     "max": 21.25
@@ -95,27 +96,28 @@
    "objects": 55,
    "recall": 1.0,
    "frames_all_found": 1.0,
-   "false_positives": 1,
-   "frames_clean": 0.917,
+   "false_positives": 0,
+   "frames_clean": 1.0,
    "err_xy_mm": {
     "n": 55,
-    "mean": 6.43,
+    "mean": 6.39,
     "median": 5.55,
     "p90": 11.61,
-    "max": 17.46
+    "max": 16.68
    },
    "err_z_mm": {
     "n": 55,
-    "mean": 5.65,
-    "median": 5.74,
+    "mean": 5.82,
+    "median": 5.77,
     "p90": 6.08,
-    "max": 6.19
+    "max": 6.31
    },
-   "err_x_mm_mean_signed": 1.6,
-   "err_y_mm_mean_signed": 4.56,
+   "err_x_mm_mean_signed": 2.06,
+   "err_y_mm_mean_signed": 4.94,
    "method": {
-    "depth": 55,
+    "depth": 54,
     "split": 0,
+    "joined": 1,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -127,8 +129,7 @@
    },
    "missed_why": {},
    "rejected": {
-    "in_bin": 75,
-    "height": 23
+    "in_bin": 60
    },
    "missed_by_shape": {},
    "objects_by_shape": {
@@ -139,10 +140,10 @@
    "recall_in_view": 1.0,
    "err_xy_mm_bias_removed": {
     "n": 55,
-    "mean": 3.66,
-    "median": 1.83,
-    "p90": 8.87,
-    "max": 21.85
+    "mean": 3.28,
+    "median": 1.79,
+    "p90": 8.68,
+    "max": 16.93
    },
    "xy_by_shape": {
     "cube": {
@@ -161,10 +162,10 @@
     },
     "triangle": {
      "n": 19,
-     "mean": 6.26,
+     "mean": 6.13,
      "median": 5.46,
      "p90": 9.01,
-     "max": 17.46
+     "max": 15.0
     }
    }
   },
@@ -173,27 +174,28 @@
    "objects": 55,
    "recall": 0.982,
    "frames_all_found": 0.917,
-   "false_positives": 2,
-   "frames_clean": 0.833,
+   "false_positives": 0,
+   "frames_clean": 0.917,
    "err_xy_mm": {
     "n": 54,
-    "mean": 6.52,
+    "mean": 6.4,
     "median": 5.89,
-    "p90": 10.97,
+    "p90": 10.42,
     "max": 19.66
    },
    "err_z_mm": {
     "n": 54,
     "mean": 5.93,
     "median": 5.92,
-    "p90": 6.39,
-    "max": 6.61
+    "p90": 6.35,
+    "max": 6.49
    },
-   "err_x_mm_mean_signed": 2.8,
-   "err_y_mm_mean_signed": 5.02,
+   "err_x_mm_mean_signed": 2.65,
+   "err_y_mm_mean_signed": 5.22,
    "method": {
-    "depth": 37,
+    "depth": 35,
     "split": 17,
+    "joined": 2,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -207,8 +209,8 @@
     "occluded": 1
    },
    "rejected": {
-    "in_bin": 73,
-    "height": 23
+    "in_bin": 61,
+    "height": 2
    },
    "missed_by_shape": {
     "triangle": 1
@@ -221,10 +223,10 @@
    "recall_in_view": 0.982,
    "err_xy_mm_bias_removed": {
     "n": 54,
-    "mean": 2.59,
-    "median": 1.01,
-    "p90": 7.76,
-    "max": 17.79
+    "mean": 2.42,
+    "median": 1.04,
+    "p90": 6.88,
+    "max": 17.55
    },
    "xy_by_shape": {
     "cube": {
@@ -236,10 +238,10 @@
     },
     "cylinder": {
      "n": 18,
-     "mean": 6.55,
+     "mean": 6.21,
      "median": 6.18,
-     "p90": 8.43,
-     "max": 17.66
+     "p90": 8.19,
+     "max": 12.34
     },
     "triangle": {
      "n": 19,
@@ -255,27 +257,28 @@
    "objects": 52,
    "recall": 0.827,
    "frames_all_found": 0.25,
-   "false_positives": 5,
-   "frames_clean": 0.083,
+   "false_positives": 0,
+   "frames_clean": 0.25,
    "err_xy_mm": {
     "n": 43,
-    "mean": 9.08,
+    "mean": 8.72,
     "median": 6.91,
-    "p90": 15.87,
+    "p90": 15.51,
     "max": 28.72
    },
    "err_z_mm": {
     "n": 43,
-    "mean": 5.78,
+    "mean": 6.44,
     "median": 6.46,
-    "p90": 6.53,
-    "max": 6.57
+    "p90": 6.55,
+    "max": 6.59
    },
-   "err_x_mm_mean_signed": 5.13,
-   "err_y_mm_mean_signed": 5.19,
+   "err_x_mm_mean_signed": 5.4,
+   "err_y_mm_mean_signed": 4.71,
    "method": {
-    "depth": 43,
+    "depth": 38,
     "split": 0,
+    "joined": 5,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -290,8 +293,8 @@
     "out_of_view": 4
    },
    "rejected": {
-    "in_bin": 65,
-    "height": 23
+    "in_bin": 62,
+    "height": 2
    },
    "missed_by_shape": {
     "cylinder": 4,
@@ -306,10 +309,10 @@
    "recall_in_view": 0.896,
    "err_xy_mm_bias_removed": {
     "n": 43,
-    "mean": 5.42,
-    "median": 3.14,
-    "p90": 13.11,
-    "max": 28.7
+    "mean": 5.15,
+    "median": 3.47,
+    "p90": 10.31,
+    "max": 28.15
    },
    "xy_by_shape": {
     "cube": {
@@ -321,10 +324,10 @@
     },
     "cylinder": {
      "n": 16,
-     "mean": 9.67,
+     "mean": 8.72,
      "median": 6.8,
-     "p90": 19.52,
-     "max": 24.02
+     "p90": 15.14,
+     "max": 23.29
     },
     "triangle": {
      "n": 12,
@@ -340,7 +343,7 @@
    "objects": 49,
    "recall": 0.633,
    "frames_all_found": 0.083,
-   "false_positives": 1,
+   "false_positives": 0,
    "frames_clean": 0.083,
    "err_xy_mm": {
     "n": 31,
@@ -359,8 +362,9 @@
    "err_x_mm_mean_signed": 5.23,
    "err_y_mm_mean_signed": 1.77,
    "method": {
-    "depth": 31,
+    "depth": 30,
     "split": 0,
+    "joined": 1,
     "plane": 0
    },
    "yaw_err_deg_cube": {
@@ -375,8 +379,7 @@
     "occluded": 2
    },
    "rejected": {
-    "in_bin": 72,
-    "height": 18
+    "in_bin": 63
    },
    "missed_by_shape": {
     "cylinder": 5,
