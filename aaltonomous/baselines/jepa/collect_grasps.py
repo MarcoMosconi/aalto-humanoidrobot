@@ -20,7 +20,7 @@ import numpy as np
 from .collect import _downscale, make_env, parse_seeds
 from .common import ActionSpace, load_config
 from .data import save_episode
-from .grasp import ExploreGraspPolicy
+from .grasp import ExploreGraspPolicy, TriangleProbePolicy
 
 
 def lift_xy(pick):
@@ -48,6 +48,8 @@ def main(argv=None):
     ap.add_argument("--p-classical", type=float, default=0.3)
     ap.add_argument("--prefer", default=None, help="variant name substring to try first (e.g. h0.35: more drops)")
     ap.add_argument("--p-prefer", type=float, default=0.7)
+    ap.add_argument("--triangles", action="store_true",
+                    help="TriangleProbePolicy: random finger direction on triangles only, logs shape + triangle yaw")
     ap.add_argument("--held-z", type=float, default=0.06, help="object centre this far above the counter = held")
     ap.add_argument("--size", type=int, nargs=2, default=[240, 320])
     a = ap.parse_args(argv)
@@ -61,8 +63,13 @@ def main(argv=None):
             if (out / "picks" / f"sim_seed{seed:04d}.json").exists():
                 continue
             env.rng = np.random.default_rng(seed)
-            pol = ExploreGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, log=lambda m: None,
-                                     seed=seed, p_classical=a.p_classical, prefer=a.prefer, p_prefer=a.p_prefer)
+            if a.triangles:
+                pol = TriangleProbePolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+                                          log=lambda m: None, seed=seed)
+            else:
+                pol = ExploreGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+                                         log=lambda m: None, seed=seed, p_classical=a.p_classical, prefer=a.prefer,
+                                         p_prefer=a.p_prefer)
             t0 = time.monotonic()
             obs = env.reset()
             pol.reset({"instruction": obs["instruction"]})
@@ -126,7 +133,8 @@ def main(argv=None):
                               "delivered": delivered.get(i),
                               "color": pk["plan"].color, "side": pk["plan"].side, "target": pk["plan"].target_bin,
                               "t": pk["t"], "lift_end": le, "tick0": pk.get("tick0"),
-                              "grasp_xyz": [float(x) for x in pk["plan"].waypoints["grasp"]]})
+                              "grasp_xyz": [float(x) for x in pk["plan"].waypoints["grasp"]],
+                              "shape": pk.get("shape")})
             save_episode(out / "picks" / f"sim_seed{seed:04d}", arrays, {"seed": seed, "picks": pmeta, **{
                 kk: meta[kk] for kk in ("n_correct", "n_objects", "outcomes")}})
             nh = sum(p["held"] for p in pmeta)

@@ -107,7 +107,16 @@ v5 on seeds 0-15: 58/72 (81 %) vs classical 54/72 (75 %).
 **Sim head-camera bias.** `classical/perception_eval.py` shows detections offset by a constant (+2.8, +4.6) mm in
 pelvis xy (std 0.3 mm in x) on the sim, recall 100 % on episode layouts. The grasp data agrees (shift -6 mm in y:
 held 85 % vs 58 % stock). `grasp_eval.py --set '{"perception.xy_offset": [-0.0028, -0.0047]}'` uses the classical
-config's own correction knob (xy error 5.5 -> 1.6 mm). Sim value only: measure it again on the robot.
+config's own correction knob (xy error 5.5 -> 1.6 mm). Sim value only: measure it again on the robot. It did
+not raise the score (classical 47/72, v5 56/72 with it), so it is off by default: aim is not the grasp problem.
+
+**Shapes (`shapes.py`).** Classical losses are mostly triangles (55 % sorted vs ~80 % cubes / cylinders); every
+unsorted object is left on the counter after 2 failed tries. `ShapePerception` (wraps the classical Perception, same
+detections) adds `det.shape` (hull fill of rectangle / circle / enclosing triangle + an equilateral check) and
+`det.tri_yaw` (apex direction mod 120 deg). On 65 sim frames vs ground truth: cube 100 %, cylinder 95 %, triangle 93 %
+(misses are partly hidden), triangle yaw error median 0.2 deg / max 2.6 deg (`python -m ...jepa.shapes <raw dirs>`,
+frames from `classical/perception_eval.py --raw`). `collect_grasps.py --triangles` + `python -m ...jepa.shapes grasps`
+measure held rate vs the hand's closing axis (thumb -> fingers, FK) relative to the triangle.
 
 ## Design notes and known limits
 

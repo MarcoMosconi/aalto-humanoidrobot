@@ -207,7 +207,8 @@ class _VariantPolicy(ClassicalPolicy):
     def _start(self, plan, t):
         self.picks.append({"t": t, "plan": plan, "variant": getattr(plan, "variant", {"name": "classical"}),
                            "obs": self._look_obs, "arm0": self.arm_cmd.copy(), "hand0": self.hand_cmd.copy(),
-                           "lift_end": lift_end(plan), "scores": getattr(plan, "scores", None)})
+                           "lift_end": lift_end(plan), "scores": getattr(plan, "scores", None),
+                           "shape": getattr(plan, "shape_info", None)})
         return super()._start(plan, t)
 
     def choose(self, det, arm_q, hand_q, obstacles):
@@ -237,6 +238,34 @@ class ExploreGraspPolicy(_VariantPolicy):
             p = plan_variant(self._inner, det, v, arm_q, hand_q, obstacles)
             if p.ok:
                 p.variant = v.as_dict()
+                return p
+            last = p
+        return last
+
+
+class TriangleProbePolicy(_VariantPolicy):
+    """Data collection for triangle grasp orientation: ShapePerception (shapes.py) labels each detection; triangles get
+    a random finger direction over the reachable fan (hint weight 1), everything else the stock plan. Each pick logs
+    det.shape / det.tri_yaw (plan.shape_info) so held can be read against the hand's angle to the triangle."""
+
+    def __init__(self, *a, fan=(-90.0, 30.0), **kw):
+        super().__init__(*a, **kw)
+        from .shapes import ShapePerception
+        self.perception = ShapePerception(self.cfg, self.scene, self.cal)
+        self.fan = fan
+
+    def choose(self, det, arm_q, hand_q, obstacles):
+        info = {"shape": getattr(det, "shape", None), "tri_yaw": getattr(det, "tri_yaw", None),
+                "feat": getattr(det, "shape_feat", None)}
+        vs = []
+        if info["shape"] == "triangle":
+            vs = [Variant(hint_deg=float(h), hint_weight=1.0, name=f"tri{h:+.0f}")
+                  for h in self.rng.uniform(*self.fan, size=6)]
+        last = None
+        for v in vs + [Variant()]:
+            p = plan_variant(self._inner, det, v, arm_q, hand_q, obstacles)
+            if p.ok:
+                p.variant, p.shape_info = v.as_dict(), info
                 return p
             last = p
         return last
