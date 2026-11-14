@@ -253,9 +253,11 @@ class JepaGraspPolicy(_VariantPolicy):
                 plans.append(p)
             else:
                 last = last or p
+        self._cands = []
         if not plans:
             return last
         grasp = [p for p in plans if lift_end(p) is not None]
+        self._cands = grasp                               # for viewers (live_demo.py)
         if len(grasp) <= 1:
             return plans[0]
         if hasattr(self.critic, "score_plans"):          # object-centred critic (crop_critic.CropGraspCritic)

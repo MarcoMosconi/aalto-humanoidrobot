@@ -59,6 +59,26 @@ python -m unittest aaltonomous/baselines/jepa/test_jepa.py -v      # offline, ~1
 Use the same latent dir for training and as the goal bank, or a separate one (e.g. only real demos) for the bank;
 both must come from the same encoder config (`manifest.json`; the checkpoint stores it and the policy uses it).
 
+## Live demo (watch it in the browser)
+
+```bash
+python -m aaltonomous.baselines.jepa.live_demo --critic runs/jepa/crop_critic.pt                 # Isaac sim running
+python -m aaltonomous.baselines.jepa.live_demo --backend mock --critic runs/jepa/crop_critic.pt  # no sim needed
+# open http://localhost:8766   (remote: ssh -L 8766:localhost:8766 <host>)
+```
+
+Episodes run back to back. The page streams the head camera (~10 fps) with the target, chosen grasp point, drop
+arrow and both hands overlaid; each grasp decision as the object-centred crops the world model imagines from, with
+p(held) per candidate and the chosen one highlighted; whether the object was actually held after the lift (sim);
+an event feed and the running score. `--policy classical` shows the stock planner in the same view.
+
+## Rung-1 grasp critic (classical + JEPA)
+
+`grasp.py`, `collect_grasps.py`, `crop_critic.py`, `grasp_eval.py`: the classical planner proposes grasp variants
+per object; V-JEPA 2 encodes a crop around the grasp, the action-conditioned predictor imagines approach + close +
+lift in latent space, a probe reads p(held) and the best candidate runs. On the full head frame "held" is barely
+readable even from the real lift-end latent (AUC 0.68); on the crop it is (0.93), so the critic works on crops.
+
 ## Design notes and known limits
 
 - **Goals are the hard part.** V-JEPA 2-AC reaches goal images with short plans; sorting is long-horizon. Here the

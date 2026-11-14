@@ -356,7 +356,9 @@ class CropGraspCritic:
             acts.append(traj_actions(self.space, p.arm, p.hand, arm_q, hand_q, le))
         z0 = self.enc.encode({self.enc.cameras[0]: np.stack(crops)})
         s0 = torch.as_tensor(self.space.state(arm_q, hand_q)).expand(len(plans), 16)
-        return self.probe(imagine(self.model, z0, s0, acts, self.device)).cpu().numpy()
+        sc = self.probe(imagine(self.model, z0, s0, acts, self.device)).cpu().numpy()
+        self.last = {"crops": crops, "scores": sc}   # for viewers (live_demo.py)
+        return sc
 
 
 def main(argv=None):

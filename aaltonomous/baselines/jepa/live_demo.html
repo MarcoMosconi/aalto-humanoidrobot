@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JEPA Grasp Critic Live</title>
+<style>
+  :root {
+    --bg: #0d1014; --panel: #151a21; --panel2: #1b222b; --line: #26303c;
+    --text: #e6ebf1; --muted: #8e9aa8; --accent: #4fd1a5; --warn: #f2b84b; --bad: #ef6b6b;
+    --red: #e64646; --yellow: #f0cd28; --blue: #3c82f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 14px 20px 6px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); animation: pulse 1.2s infinite; }
+  .dot.ok { background: var(--accent); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .sub { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 14px; padding: 8px 20px 20px; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; padding: 8px 16px 16px; } header { padding: 12px 16px 4px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .video { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4 / 3; }
+  .video img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .phase { margin-top: 10px; font-size: 16px; font-weight: 600; }
+  .instr { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 10px; }
+  .stat b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .dec-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-weight: 600; font-size: 12px; color: #111; }
+  .cands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .cand { background: var(--panel2); border: 2px solid transparent; border-radius: 8px; padding: 6px; min-width: 0; }
+  .cand.chosen { border-color: var(--accent); }
+  .cand img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 5px; display: block; background: #000; }
+  .cand .nm { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar { height: 6px; background: #0b0e12; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--warn); }
+  .cand.chosen .bar > div { background: var(--accent); }
+  .p { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 14px 0; }
+  .feed { max-height: 230px; overflow: auto; font-size: 13px; }
+  .feed div { padding: 4px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  .feed time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .good { color: var(--accent); } .badc { color: var(--bad); }
+  .how { color: var(--muted); font-size: 13px; }
+  .how ol { margin: 6px 0 0; padding-left: 18px; }
+  .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>JEPA grasp critic, live</h1>
+  <span class="live"><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+  <span class="sub" id="meta"></span>
+</header>
+<main>
+  <section class="card">
+    <h2>Head camera</h2>
+    <div class="video"><img id="video" src="/stream.mjpg" alt="Live head camera with overlay"></div>
+    <div class="phase" id="phase">–</div>
+    <div class="instr" id="instr"></div>
+    <div class="legend">
+      <span><i style="border:2px solid #fff;background:none"></i>chosen grasp point</span>
+      <span>→ drop into bin</span>
+      <span><i style="background:#50ffa0"></i>left hand</span>
+      <span><i style="background:#ff78dc"></i>right hand</span>
+    </div>
+  </section>
+
+  <div class="side">
+    <section class="card">
+      <h2>Score so far</h2>
+      <div class="stats">
+        <div class="stat"><b id="s-obj">–</b><span>objects sorted</span></div>
+        <div class="stat"><b id="s-held">–</b><span>grasps held</span></div>
+        <div class="stat"><b id="s-ep">–</b><span>episodes all-correct</span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="dec-head"><h2 style="margin:0">Latest grasp decision</h2><span id="dec-meta" class="sub"></span></div>
+      <div id="cands" class="cands"><div class="empty">Waiting for the first look…</div></div>
+    </section>
+
+    <section class="card">
+      <h2>Events</h2>
+      <div class="feed" id="feed"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Episodes</h2>
+    <table><thead><tr><th>#</th><th>seed</th><th>sorted</th><th>grasps held</th><th>time</th><th>end</th></tr></thead>
+      <tbody id="eps"><tr><td colspan="6" class="empty">First episode running…</td></tr></tbody></table>
+  </section>
+
+  <section class="card how">
+    <h2>What you are watching</h2>
+    The classical planner proposes several grasps per object (finger direction, offset, height). For each, a frozen
+    <b>V-JEPA 2</b> encoder embeds a crop around the grasp, and a learned action-conditioned predictor
+    <b>imagines</b> the crop's latent through approach, close and lift, without moving the robot. A probe reads
+    p(object still in the hand) from the imagined latent; the robot executes the most promising grasp.
+    <ol>
+      <li>look → detect objects (head RGB-D)</li>
+      <li>plan candidate grasps (IK, safety pre-check)</li>
+      <li>imagine each in latent space → p(held)</li>
+      <li>execute the best, carry to the bin, repeat</li>
+    </ol>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const CHIP = { red: "var(--red)", yellow: "var(--yellow)", blue: "var(--blue)" };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let lastDecision = -1, fails = 0;
+
+function pct(a, b) { return b ? `${a}/${b} <span class="sub" style="font-size:13px">${Math.round(100 * a / b)}%</span>` : "–"; }
+
+function render(s) {
+  $("meta").textContent = `${s.policy === "critic" ? "classical + JEPA critic" : "stock classical"} · ${s.backend}` +
+    (s.episode !== null ? ` · episode ${s.episode} (seed ${s.seed})` : "");
+  $("phase").textContent = s.phase || "–";
+  $("instr").textContent = s.instruction || "";
+  const T = s.totals;
+  $("s-obj").innerHTML = pct(T.correct, T.objects);
+  $("s-held").innerHTML = s.backend === "mock" ? "n/a" : pct(T.held, T.picks);
+  $("s-ep").innerHTML = pct(T.all_correct, T.episodes);
+
+  if (s.decision && s.decisions_n !== lastDecision) {
+    lastDecision = s.decisions_n;
+    const d = s.decision;
+    $("dec-meta").innerHTML = `<span class="chip" style="background:${CHIP[d.color] || "#ccc"}">${esc(d.color)}</span> at t=${d.t.toFixed(1)} s`;
+    $("cands").innerHTML = d.cands.map(c => `
+      <div class="cand${c.chosen ? " chosen" : ""}">
+        ${c.img ? `<img src="data:image/jpeg;base64,${c.img}" alt="${esc(c.name)} crop">` : `<div class="empty">no crop</div>`}
+        <div class="nm" title="${esc(c.name)}">${c.chosen ? "▶ " : ""}${esc(c.name)}</div>
+        ${c.p === null ? `<div class="sub">${c.dur} s plan</div>` :
+          `<div class="p">${(100 * c.p).toFixed(0)}% held</div><div class="bar"><div style="width:${(100 * c.p).toFixed(0)}%"></div></div>`}
+      </div>`).join("");
+  }
+  $("feed").innerHTML = s.events.map(e => `<div><time>${e.wall}</time><span>${esc(e.msg)}</span></div>`).join("");
+  if (s.episodes.length) {
+    $("eps").innerHTML = s.episodes.map(e => `<tr><td>${e.episode}</td><td>${e.seed}</td>
+      <td class="${e.correct === e.n ? "good" : ""}">${e.correct}/${e.n}</td>
+      <td>${s.backend === "mock" ? "–" : `${e.held}/${e.picks}`}</td><td>${e.t} s</td><td>${esc(e.end)}</td></tr>`).join("");
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/state.json", { cache: "no-store" });
+    render(await r.json());
+    fails = 0; $("dot").classList.add("ok"); $("conn").textContent = "live";
+  } catch (e) {
+    fails++; $("dot").classList.remove("ok"); $("conn").textContent = "reconnecting…";
+    if (fails === 3) $("video").src = "/stream.mjpg?" + Date.now();
+  }
+  setTimeout(poll, 400);
+}
+poll();
+</script>
+</body>
+</html>
