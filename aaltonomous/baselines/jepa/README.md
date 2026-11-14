@@ -102,6 +102,12 @@ projected on the open->closed line) separates held from empty perfectly in the s
 ambiguous band (0.99-0.998, where real-robot noise would land) to the JEPA verifier, which runs and is logged on every
 pick. Retries switch grasp family, best delivery rate first (`fit_variant_prior(..., label="delivered")`). Drops
 during the carry stay unpredictable from both the lift crop (AUC ~0.62 on 36 drops) and the fingers (~0.4-0.5).
+v5 on seeds 0-15: 58/72 (81 %) vs classical 54/72 (75 %).
+
+**Sim head-camera bias.** `classical/perception_eval.py` shows detections offset by a constant (+2.8, +4.6) mm in
+pelvis xy (std 0.3 mm in x) on the sim, recall 100 % on episode layouts. The grasp data agrees (shift -6 mm in y:
+held 85 % vs 58 % stock). `grasp_eval.py --set '{"perception.xy_offset": [-0.0028, -0.0047]}'` uses the classical
+config's own correction knob (xy error 5.5 -> 1.6 mm). Sim value only: measure it again on the robot.
 
 ## Design notes and known limits
 

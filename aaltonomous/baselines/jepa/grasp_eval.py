@@ -29,12 +29,15 @@ def main(argv=None):
     ap.add_argument("--critic", default=None, help="critic file (jepa: required; verify: optional ranking of retries)")
     ap.add_argument("--n-variants", type=int, default=6)
     ap.add_argument("--margin", type=float, default=0.05, help="variant must beat the stock plan's p(held) by this")
+    ap.add_argument("--set", default=None, help='classical config overrides as json, e.g. '
+                    '\'{"perception.xy_offset": [-0.0028, -0.0047]}\' (sim head-camera bias, perception_eval.py)')
     ap.add_argument("--seeds", nargs="+", default=["0-7"])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--time-limit", type=float, default=120.0)
     ap.add_argument("--log", default=None)
     a = ap.parse_args(argv)
     env, sc = make_env("sim", a.host, a.time_limit)
+    ov = json.loads(a.set) if a.set else None
     from .grasp import JepaGraspPolicy, _VariantPolicy, make_variants, plan_variant
 
     def load_any_critic(path):
@@ -49,19 +52,19 @@ def main(argv=None):
         from .crop_critic import HeldVerifier
         from .grasp import JepaVerifyPolicy
         critic = load_any_critic(a.critic) if a.critic else None
-        pol = JepaVerifyPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+        pol = JepaVerifyPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, overrides=ov,
                                verifier=HeldVerifier(a.verifier, encoder=getattr(critic, "enc", None)), critic=critic,
                                n_variants=a.n_variants, margin=a.margin,
                                prior=json.load(open(a.prior)) if a.prior else None, max_attempts=a.max_attempts)
     elif a.policy == "v5":
         from .crop_critic import HeldVerifier
         from .grasp import FingerJepaVerifyPolicy
-        pol = FingerJepaVerifyPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+        pol = FingerJepaVerifyPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, overrides=ov,
                                      verifier=HeldVerifier(a.verifier), max_attempts=a.max_attempts,
                                      family_prior=json.load(open(a.family_prior)) if a.family_prior else None)
     elif a.policy == "jepa":
         critic = load_any_critic(a.critic)
-        pol = JepaGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, critic=critic,
+        pol = JepaGraspPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, overrides=ov, critic=critic,
                               n_variants=a.n_variants, margin=a.margin)
     else:
         class Stock(_VariantPolicy):     # stock classical plan, but logged the same way
@@ -69,7 +72,7 @@ def main(argv=None):
                 p = plan_variant(self._inner, det, make_variants(det, None, 1)[0], arm_q, hand_q, obstacles)
                 p.variant = {"name": "classical"}
                 return p
-        pol = Stock(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit)
+        pol = Stock(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit, overrides=ov)
     rows = []
     try:
         for seed in parse_seeds(a.seeds):
