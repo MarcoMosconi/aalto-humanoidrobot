@@ -104,6 +104,13 @@ pick. Retries switch grasp family, best delivery rate first (`fit_variant_prior(
 during the carry stay unpredictable from both the lift crop (AUC ~0.62 on 36 drops) and the fingers (~0.4-0.5).
 v5 on seeds 0-15: 58/72 (81 %) vs classical 54/72 (75 %).
 
+**v5 as a submission (`v5_server.py`, `aaltonomous/docker/v5.Dockerfile`).** Same `FingerJepaVerifyPolicy` behind the
+policy-server protocol (verifier `held_verifier_all_fa0.10.pt`, family prior `variant_prior_dlv.json`, 6 attempts);
+the JEPA verifier only runs when the fingers are unsure (`AALTO_V5_ALWAYS_JEPA=1`: every pick). Sim gate 2026-11-15
+(`sim.evaluate --policy ws://localhost:8000 --seed 0 --trials 8`, nominal, server outside Docker): **PASS**, 34/38
+(90 %), 5/8 all-correct, 0 clips, 30.0 Hz, policy real-time rate >= 85 Hz. All 51 lift checks were decided by the
+fingers (JEPA never decided). Image not built yet (no Docker on the box).
+
 **Sim head-camera bias.** `classical/perception_eval.py` shows detections offset by a constant (+2.8, +4.6) mm in
 pelvis xy (std 0.3 mm in x) on the sim, recall 100 % on episode layouts. The grasp data agrees (shift -6 mm in y:
 held 85 % vs 58 % stock). `grasp_eval.py --set '{"perception.xy_offset": [-0.0028, -0.0047]}'` uses the classical
