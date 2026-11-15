@@ -3,6 +3,8 @@ position action) on our scene. No success termination and no time-out: episodes 
 which read the outcome from the scene service (hooks.py)."""
 from __future__ import annotations
 
+import os
+
 import torch
 
 import isaaclab.envs.mdp as base_mdp
@@ -83,6 +85,10 @@ class AaltoSortEnvCfg(UnitreeManagerBasedRLEnvCfg):
         self.sim.physics.enable_ccd = True
         self.sim.physics.min_position_iteration_count = 16
         self.sim.physics.min_velocity_iteration_count = 4
+        # GUI viewport only (no camera sensor): front-right of the counter (centre ~(0.39, 0, 0.80) world), ~1.8 m
+        # away, so robot, objects and bins fill the view. AALTO_VIEW="ex,ey,ez,lx,ly,lz" overrides eye + lookat.
+        view = [float(v) for v in os.environ.get("AALTO_VIEW", "1.6,-1.0,1.65,0.3,0.0,0.85").split(",")]
+        self.viewer.eye, self.viewer.lookat = tuple(view[:3]), tuple(view[3:6])
 
         # sim_main triggers these on rt/reset_pose/cmd (category 1 = objects, 2 = everything)
         self.event_manager = SimpleEventManager()
