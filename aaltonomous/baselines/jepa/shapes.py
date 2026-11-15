@@ -210,8 +210,34 @@ def grasp_report(picks_dirs):
     return rows
 
 
+def bench_report(picks_dirs):
+    """collect_grasps.py --bench: held / delivered per (finger-direction mode, grasp height) on triangles."""
+    import json
+    cell = {}
+    for d in picks_dirs:
+        for pj in sorted(Path(d).glob("*.json")):
+            for p in json.load(open(pj))["picks"]:
+                n = p["variant"]["name"]
+                key = tuple(n.split("_")[1:3]) if n.startswith("tri_") else ("stock", "")
+                cell.setdefault(key, []).append((bool(p["held"]), bool(p.get("delivered"))))
+    print(f"{'mode':8s} {'height':6s}   n  held  delivered")
+    for k in sorted(cell):
+        v = np.array(cell[k])
+        se = np.sqrt(v[:, 0].mean() * (1 - v[:, 0].mean()) / len(v))
+        print(f"{k[0]:8s} {k[1]:6s} {len(v):3d}  {v[:, 0].mean():.2f}  {v[:, 1].mean():.2f}   (held +-{se:.2f})")
+    for i, nm in ((0, "mode"), (1, "height")):
+        agg = {}
+        for k, v in cell.items():
+            if k[0] != "stock":
+                agg.setdefault(k[i], []).extend(v)
+        print(f"by {nm}: " + ", ".join(f"{a}={np.mean([x[0] for x in v]):.2f} (n={len(v)})" for a, v in sorted(agg.items())))
+    return cell
+
+
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["grasps"]:
+    if sys.argv[1:2] == ["bench"]:
+        bench_report(sys.argv[2:] or ["runs/jepa/grasps_bench/picks"])
+    elif sys.argv[1:2] == ["grasps"]:
         grasp_report(sys.argv[2:] or ["runs/jepa/grasps_tri/picks"])
     else:
         offline_check(sys.argv[1:] or ["runs/perc_raw/a", "runs/perc_raw/b"])

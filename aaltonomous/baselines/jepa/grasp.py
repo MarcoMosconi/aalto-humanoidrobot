@@ -271,6 +271,60 @@ class TriangleProbePolicy(_VariantPolicy):
         return last
 
 
+TRI_MODES = {"natural": None, "apex": 0.0, "face": 60.0, "across": 30.0}   # finger direction vs the apex direction
+
+
+def tri_hint_deg(tri_yaw, offset_deg, side, fan=(-90.0, 30.0)):
+    """Finger direction for a triangle (pelvis angle = apex direction + offset, any of the 3 symmetric copies) as a
+    LEFT-convention hint inside the reachable fan (the planner mirrors y for the right arm). None if no copy fits."""
+    best = None
+    for k in range(3):
+        a = np.degrees(tri_yaw) + offset_deg + 120.0 * k
+        a = (a + 180.0) % 360.0 - 180.0
+        h = a if side == "left" else -a
+        if fan[0] <= h <= fan[1]:
+            mid = 0.5 * (fan[0] + fan[1])
+            if best is None or abs(h - mid) < abs(best - mid):
+                best = h
+    return best
+
+
+class TriangleBenchPolicy(_VariantPolicy):
+    """Triangle grasp bench: every triangle pick gets a random (finger-direction mode, grasp height) from TRI_MODES x
+    heights; the variant name records both ("tri_<mode>_h<frac>"). Non-triangles: stock plan."""
+
+    def __init__(self, *a, heights=(0.5, 0.35), **kw):
+        super().__init__(*a, **kw)
+        from .shapes import ShapePerception
+        self.perception = ShapePerception(self.cfg, self.scene, self.cal)
+        self.heights = heights
+
+    def _variant(self, det, mode, h, side):
+        off = TRI_MODES[mode]
+        if off is None:
+            return Variant(height_frac=h, name=f"tri_{mode}_h{h}")
+        hd = tri_hint_deg(det.tri_yaw, off, side)
+        return None if hd is None else Variant(hint_deg=hd, hint_weight=1.0, height_frac=h, name=f"tri_{mode}_h{h}")
+
+    def choose(self, det, arm_q, hand_q, obstacles):
+        info = {"shape": getattr(det, "shape", None), "tri_yaw": getattr(det, "tri_yaw", None)}
+        if info["shape"] == "triangle" and info["tri_yaw"] is not None:
+            for _ in range(6):
+                mode = list(TRI_MODES)[int(self.rng.integers(len(TRI_MODES)))]
+                h = float(self.heights[int(self.rng.integers(len(self.heights)))])
+                for side in ("left", "right"):             # the planner picks the arm; hint depends on it
+                    v = self._variant(det, mode, h, side)
+                    if v is None:
+                        continue
+                    p = plan_variant(self._inner, det, v, arm_q, hand_q, obstacles)
+                    if p.ok and (v.hint_deg is None or p.side == side):
+                        p.variant, p.shape_info = v.as_dict(), {**info, "mode": mode}
+                        return p
+        p = plan_variant(self._inner, det, Variant(), arm_q, hand_q, obstacles)
+        p.variant, p.shape_info = Variant().as_dict(), info
+        return p
+
+
 class JepaGraspPolicy(_VariantPolicy):
     """Evaluation: plan every variant, imagine each grasp with the world model, run the most likely to hold."""
 

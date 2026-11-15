@@ -20,7 +20,7 @@ import numpy as np
 from .collect import _downscale, make_env, parse_seeds
 from .common import ActionSpace, load_config
 from .data import save_episode
-from .grasp import ExploreGraspPolicy, TriangleProbePolicy
+from .grasp import ExploreGraspPolicy, TriangleBenchPolicy, TriangleProbePolicy
 
 
 def lift_xy(pick):
@@ -50,12 +50,17 @@ def main(argv=None):
     ap.add_argument("--p-prefer", type=float, default=0.7)
     ap.add_argument("--triangles", action="store_true",
                     help="TriangleProbePolicy: random finger direction on triangles only, logs shape + triangle yaw")
+    ap.add_argument("--bench", action="store_true",
+                    help="triangle bench: 5 triangles per layout, TriangleBenchPolicy (finger-direction mode x height)")
     ap.add_argument("--held-z", type=float, default=0.06, help="object centre this far above the counter = held")
     ap.add_argument("--size", type=int, nargs=2, default=[240, 320])
     a = ap.parse_args(argv)
     cfg = load_config()
     k = int(cfg["macro_ticks"])
     env, sc = make_env("sim", a.host, a.time_limit)
+    if a.bench:                                   # only triangles, 5 per layout (the episode region fits 5)
+        lk = env.scene.layout_kwargs
+        env.scene.layout_kwargs = lambda: {**lk(), "shapes": ["triangle"], "n_min": 5, "n_max": 5}
     space = ActionSpace(cfg, safety=env.filter.cfg)
     out = Path(a.out)
     try:
@@ -63,7 +68,10 @@ def main(argv=None):
             if (out / "picks" / f"sim_seed{seed:04d}.json").exists():
                 continue
             env.rng = np.random.default_rng(seed)
-            if a.triangles:
+            if a.bench:
+                pol = TriangleBenchPolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
+                                          log=lambda m: None, seed=seed)
+            elif a.triangles:
                 pol = TriangleProbePolicy(safety=env.filter.cfg, threaded=True, time_limit=a.time_limit,
                                           log=lambda m: None, seed=seed)
             else:

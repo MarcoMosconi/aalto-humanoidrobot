@@ -117,6 +117,11 @@ detections) adds `det.shape` (hull fill of rectangle / circle / enclosing triang
 (misses are partly hidden), triangle yaw error median 0.2 deg / max 2.6 deg (`python -m ...jepa.shapes <raw dirs>`,
 frames from `classical/perception_eval.py --raw`). `collect_grasps.py --triangles` + `python -m ...jepa.shapes grasps`
 measure held rate vs the hand's closing axis (thumb -> fingers, FK) relative to the triangle.
+On 92 random-direction triangle grasps (31 % held) neither the angle to the triangle nor the aim point separated held
+from failed; failed grasps leave the triangle in place (the pinch closes without squeezing it). Direct test:
+`collect_grasps.py --bench` (5 triangles per layout, `TriangleBenchPolicy`: finger direction natural / to an apex /
+to a face / across x grasp height 0.5 / 0.35) and `python -m ...jepa.shapes bench` for held per cell. A failed
+triangle grasp can tip it on its side (re-detected as a rectangle).
 
 ## Design notes and known limits
 
